@@ -138,10 +138,10 @@ graph TD
     end
 
     subgraph Preprocessing
-        B1{Convert Times/Durations to Slots}
-        B2{Map Preferences to Allowed Slot Sets}
-        B3{Create Commitment Slot Set}
-        B4{Validate Inputs (Deadlines, Durations)}
+        B1{"Convert Times/Durations to Slots"}
+        B2{"Map Preferences to Allowed Slot Sets"}
+        B3{"Create Commitment Slot Set"}
+        B4{"Validate Inputs (Deadlines, Durations)"}
 
         A1 --> B1
         A2 --> B1
@@ -150,58 +150,59 @@ graph TD
         A1 --> B4
     end
 
-    subgraph Model Definition
-        C1(Decision Variables)
-        C1.1["X[i, s]: Task 'i' starts at slot 's' (Binary)"]
-        C1.2["Y[s]: Slot 's' occupied by *any* task (Binary)"]
-        C1.3["L[s]: Leisure minutes in slot 's' (Continuous 0-15)"]
+    subgraph Model_Definition["Model Definition"]
+        C1["Decision Variables"]
+        C1_1["X[i, s]: Task 'i' starts at slot 's' (Binary)"]
+        C1_2["Y[s]: Slot 's' occupied by *any* task (Binary)"]
+        C1_3["L[s]: Leisure minutes in slot 's' (Continuous 0-15)"]
 
-        C2(Objective Function)
-        C2.1["Maximize: α * Σ L[s] - β * Σ (X[i,s] * P[i] * D[i])"]
-        C2.2["(Maximize Leisure - Minimize Stress)"]
+        C2["Objective Function"]
+        C2_1["Maximize: α * Σ L[s] - β * Σ (X[i,s] * P[i] * D[i])"]
+        C2_2["(Maximize Leisure - Minimize Stress)"]
 
-        C3(Constraints)
-        C3.1["1. Task Assignment (Σ X[i, s] == 1 for each i)"]
-        C3.2["2. Deadlines (Task 'i' finishes by deadline_slot[i])"]
-        C3.3["3. No Task Overlap (Σ Occupying Tasks <= 1 for each slot)"]
-        C3.4["4. Preferences (X[i, s] = 0 if 's' not allowed for preference[i])"]
-        C3.5["5. Commitments (X[i, s] = 0 if task 'i' at 's' overlaps commitment)"]
-        C3.6["6. Leisure Link (L[s] <= 15 * (1 - Y[s]) * (1 - IsCommitted[s]))"]
-        C3.7["7. Link Y[s] to X[i, s] (Y[s] = 1 if any task occupies slot 's')"]
-        C3.8["8. Daily Limit (Optional: Σ Y[s] <= limit for each day)"]
+        C3["Constraints"]
+        C3_1["1. Task Assignment (Σ X[i, s] == 1 for each i)"]
+        C3_2["2. Deadlines (Task 'i' finishes by deadline_slot[i])"]
+        C3_3["3. No Task Overlap (Σ Occupying Tasks <= 1 for each slot)"]
+        C3_4["4. Preferences (X[i, s] = 0 if 's' not allowed for preference[i])"]
+        C3_5["5. Commitments (X[i, s] = 0 if task 'i' at 's' overlaps commitment)"]
+        C3_6["6. Leisure Link (L[s] <= 15 * (1 - Y[s]) * (1 - IsCommitted[s]))"]
+        C3_7["7. Link Y[s] to X[i, s] (Y[s] = 1 if any task occupies slot 's')"]
+        C3_8["8. Daily Limit (Optional: Σ Y[s] <= limit for each day)"]
 
-
-        C1.1 --> C2 & C3
-        C1.2 --> C3.6 & C3.7 & C3.8
-        C1.3 --> C2 & C3.6
+        C1 --> C1_1 & C1_2 & C1_3
+        C1_1 --> C2 & C3
+        C1_2 --> C3_6 & C3_7 & C3_8
+        C1_3 --> C2 & C3_6
     end
 
     subgraph Solver
-        D1[PuLP Model Formulation]
-        D2{CBC Solver Engine}
+        D1["PuLP Model Formulation"]
+        D2{"CBC Solver Engine"}
         D1 --> D2
     end
 
     subgraph Outputs
-        E1{Solver Status (Optimal, Feasible, Infeasible)}
-        E2[Optimized Schedule (Tasks with start/end times/slots)]
-        E3[Total Leisure Value]
-        E4[Total Stress Score]
-        E5[Warnings (from input processing)]
+        E1{"Solver Status (Optimal, Feasible, Infeasible)"}
+        E2["Optimized Schedule (Tasks with start/end times/slots)"]
+        E3["Total Leisure Value"]
+        E4["Total Stress Score"]
+        E5["Warnings (from input processing)"]
     end
 
     Inputs --> Preprocessing
-    Preprocessing --> Model Definition
-    Model Definition --> D1
+    Preprocessing --> Model_Definition
+    Model_Definition --> D1
     D2 --> Postprocessing["Format Results"]
     Postprocessing --> Outputs
 
     %% Relationships / Dependencies
-    B1 --> C3.2 & C3.3 & C3.5 & C3.6 & C3.7 & C3.8 %% Slot conversions needed for many constraints
-    B2 --> C3.4 %% Preferences link
-    B3 --> C3.5 & C3.6 %% Commitments link
-    A3 --> C2 %% Alpha/Beta for objective
-    A3 --> C3.8 %% Daily limit setting
+    B1 --> C3_2 & C3_3 & C3_5 & C3_6 & C3_7 & C3_8
+    B2 --> C3_4
+    B3 --> C3_5 & C3_6
+    A3 --> C2
+    A3 --> C3_8
+
 ```
 
 ## Project Structure
