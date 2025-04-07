@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react"; // Added useMemo
+// bc2411/project/src/App.tsx
+
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Calendar,
   Clock,
@@ -9,10 +11,11 @@ import {
   X,
   Sparkles,
   Loader2,
-  ArrowLeft, // For prev week
-  ArrowRight, // For next week
-  Info, // For info icons
-  Trash2, // For delete buttons
+  ArrowLeft,
+  ArrowRight,
+  Info,
+  Trash2,
+  Edit, // Added Edit icon
 } from "lucide-react";
 import {
   format,
@@ -23,8 +26,9 @@ import {
   isSameDay,
   differenceInMinutes,
   isValid,
-  startOfDay, // Use startOfDay for comparisons
-  endOfDay, // Might be useful
+  startOfDay,
+  // endOfDay, // Might be useful, not currently used
+  parse, // Added for parsing date/time inputs
 } from "date-fns";
 
 // Assume backend returns naive local ISO strings (no 'Z' or offset)
@@ -73,13 +77,41 @@ const parseLocalISO = (dateString: string | null | undefined): Date | null => {
   if (!dateString) return null;
   try {
     // parseISO handles strings without timezone info as local time
-    const parsed = parseISO(dateString);
+    // Handle potential lack of seconds
+    let adjustedString = dateString;
+    if (dateString.length === 16) {
+      // YYYY-MM-DDTHH:MM
+      adjustedString = dateString + ":00";
+    } else if (dateString.length === 10) {
+      // YYYY-MM-DD
+      adjustedString = dateString + "T00:00:00"; // Assume start of day if only date
+    }
+
+    const parsed = parseISO(adjustedString);
     return isValid(parsed) ? parsed : null;
   } catch (e) {
     console.error("Error parsing date string:", dateString, e);
     return null;
   }
 };
+
+// --- Types for Form Data ---
+interface TaskFormData {
+  name: string;
+  priority: number;
+  duration: number;
+  deadline: string | number; // For relative days input
+  deadlineType: "days" | "date";
+  preference: Task["preference"];
+  deadlineDate: string; // For specific date input YYYY-MM-DD
+}
+
+interface BlockFormData {
+  activity: string;
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  date: string; // YYYY-MM-DD
+}
 
 function App() {
   // --- State Hooks ---
@@ -117,25 +149,33 @@ function App() {
     ScheduledTaskItem | BlockedInterval | null
   >(null);
   const [showEventDetailsModal, setShowEventDetailsModal] = useState(false);
+
+  // --- Form States ---
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
   const [showNewBlockForm, setShowNewBlockForm] = useState(false);
+  const [showEditTaskForm, setShowEditTaskForm] = useState(false);
+  const [showEditBlockForm, setShowEditBlockForm] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingBlock, setEditingBlock] = useState<BlockedInterval | null>(
+    null,
+  );
 
-  // --- Memoized Values for Forms & Calendar ---
-  const defaultTaskData = useMemo(
+  // --- Memoized Default Form Data ---
+  const defaultTaskData = useMemo<TaskFormData>(
     () => ({
       name: "",
       priority: 3,
       duration: 60,
-      deadline: 3, // Default to 3 days from now
+      deadline: 3, // Default to 3 days from now (for relative input)
       deadlineType: "days",
       preference: "any" as Task["preference"],
       // Set default date to 3 days from now
       deadlineDate: format(addDays(new Date(), 3), "yyyy-MM-dd"),
     }),
     [],
-  ); // Empty dependency array, calculated once
+  );
 
-  const defaultBlockData = useMemo(
+  const defaultBlockData = useMemo<BlockFormData>(
     () => ({
       activity: "",
       startTime: "09:00",
@@ -143,10 +183,16 @@ function App() {
       date: format(new Date(), "yyyy-MM-dd"), // Default to today
     }),
     [],
-  ); // Empty dependency array
+  );
 
-  const [newTaskData, setNewTaskData] = useState(defaultTaskData);
-  const [newBlockData, setNewBlockData] = useState(defaultBlockData);
+  const [newTaskData, setNewTaskData] = useState<TaskFormData>(defaultTaskData);
+  const [newBlockData, setNewBlockData] =
+    useState<BlockFormData>(defaultBlockData);
+  // State to hold data for the *currently editing* forms
+  const [editTaskData, setEditTaskData] = useState<TaskFormData | null>(null);
+  const [editBlockData, setEditBlockData] = useState<BlockFormData | null>(
+    null,
+  );
 
   // **MOVED HOOKS HERE** - For Calendar Display
   const days = useMemo(
@@ -177,9 +223,91 @@ function App() {
     });
   }, [tasks, blockedIntervals, startHour, endHour]);
 
+  // Populate edit form when editingTask changes
+  useEffect(() => {
+    if (editingTask) {
+      let deadlineType: "days" | "date" = "date";
+      let deadlineValue: string | number = editingTask.deadline;
+      let deadlineDateValue = format(new Date(), "yyyy-MM-dd"); // Default
+
+      if (typeof editingTask.deadline === "number") {
+        deadlineType = "days";
+        deadlineValue = editingTask.deadline;
+        // Calculate an approximate date for the date input, though it won't be used if 'days' is selected
+        deadlineDateValue = format(
+          addDays(new Date(), editingTask.deadline),
+          "yyyy-MM-dd",
+        );
+      } else {
+        // It's a string (ISO format)
+        const parsedDate = parseLocalISO(editingTask.deadline);
+        if (parsedDate) {
+          deadlineDateValue = format(parsedDate, "yyyy-MM-dd");
+          deadlineValue = editingTask.deadline; // Keep the original string for potential use? Maybe not needed.
+          // Default relative days if switching back
+          const relativeDays = Math.ceil(
+            differenceInMinutes(parsedDate, startOfDay(new Date())) / (60 * 24),
+          );
+          deadlineValue = Math.max(0, relativeDays); // Use calculated relative days for the number input
+        } else {
+          // Handle invalid date string case - default to relative?
+          console.warn(
+            "Invalid deadline string found while editing task:",
+            editingTask.deadline,
+          );
+          deadlineType = "days";
+          deadlineValue = 3; // Default to 3 days if date was invalid
+          deadlineDateValue = format(addDays(new Date(), 3), "yyyy-MM-dd");
+        }
+      }
+
+      setEditTaskData({
+        name: editingTask.name,
+        priority: editingTask.priority,
+        duration: editingTask.duration,
+        deadline: deadlineValue, // Set the number input value correctly
+        deadlineType: deadlineType,
+        preference: editingTask.preference,
+        deadlineDate: deadlineDateValue, // Set the date input value
+      });
+      setShowEditTaskForm(true);
+    } else {
+      setEditTaskData(null);
+      setShowEditTaskForm(false);
+    }
+  }, [editingTask]);
+
+  // Populate edit form when editingBlock changes
+  useEffect(() => {
+    if (editingBlock) {
+      const start = parseLocalISO(editingBlock.startTime);
+      const end = parseLocalISO(editingBlock.endTime);
+      setEditBlockData({
+        activity: editingBlock.activity,
+        date: start
+          ? format(start, "yyyy-MM-dd")
+          : format(new Date(), "yyyy-MM-dd"),
+        startTime: start ? format(start, "HH:mm") : "09:00",
+        endTime: end ? format(end, "HH:mm") : "10:00",
+      });
+      setShowEditBlockForm(true);
+    } else {
+      setEditBlockData(null);
+      setShowEditBlockForm(false);
+    }
+  }, [editingBlock]);
+
   // --- Form Data Reset Functions ---
   const resetNewTaskForm = () => setNewTaskData(defaultTaskData);
   const resetNewBlockForm = () => setNewBlockData(defaultBlockData);
+  const closeAndResetEditTaskForm = () => {
+    setEditingTask(null); // This triggers the useEffect to close the modal
+    setError(null);
+  };
+  const closeAndResetEditBlockForm = () => {
+    setEditingBlock(null); // This triggers the useEffect to close the modal
+    setError(null);
+  };
 
   // --- API Call Functions ---
 
@@ -268,11 +396,10 @@ function App() {
       console.log("Optimization response:", result);
 
       if (!response.ok) {
-        // Extract error details if available from backend response
         throw new Error(
           result.error ||
             result.message ||
-            `HTTP error! status: ${response.status}`, // Prioritize backend error messages
+            `HTTP error! status: ${response.status}`,
         );
       }
 
@@ -284,7 +411,6 @@ function App() {
         result.schedule.forEach((item: ScheduledTaskItem) => {
           const startTime = parseLocalISO(item.startTime); // Parse as local
           if (startTime) {
-            // Group by the LOCAL date 'yyyy-MM-dd'
             const dateKey = format(startTime, "yyyy-MM-dd");
             if (!scheduleByDate[dateKey]) {
               scheduleByDate[dateKey] = [];
@@ -317,8 +443,6 @@ function App() {
           warnings: result.warnings || null,
         });
       } else {
-        // Handle non-optimal/feasible statuses or missing schedule
-        // Use the message from the solver result if available
         const failureMessage =
           result.message ||
           `Optimization failed with status: ${result.status || "Unknown"}`;
@@ -367,121 +491,215 @@ function App() {
   // --- Form Handlers ---
   const handleTaskFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    formType: "new" | "edit",
   ) => {
     const { name, value, type } = e.target;
-    // Special handling for radio buttons
-    if (name === "deadlineType") {
-      setNewTaskData((prev) => ({ ...prev, deadlineType: value }));
-      return;
-    }
+    const updateFn = formType === "new" ? setNewTaskData : setEditTaskData;
 
-    const isNumeric =
-      ["priority", "duration", "deadline"].includes(name) &&
-      type !== "select" &&
-      name !== "deadlineDate";
+    updateFn((prev: any) => {
+      // Use any temporarily, better to type check prev != null for edit
+      if (!prev) return null; // Should not happen for edit if modal is open
 
-    setNewTaskData((prev) => ({
-      ...prev,
-      [name]: isNumeric ? parseInt(value) || "" : value,
-    }));
+      // Special handling for radio buttons
+      if (name === "deadlineType") {
+        return { ...prev, deadlineType: value };
+      }
+
+      const isNumeric =
+        ["priority", "duration", "deadline"].includes(name) &&
+        type !== "select" &&
+        name !== "deadlineDate"; // Exclude the date input itself
+
+      // If changing deadline type to 'days', update the 'deadline' number input
+      if (name === "deadlineType" && value === "days") {
+        // Try to parse the current date input to calculate relative days
+        const parsedDate = parseLocalISO(`${prev.deadlineDate}T00:00:00`);
+        let relativeDays = 3; // Default
+        if (parsedDate) {
+          relativeDays = Math.max(
+            0,
+            Math.ceil(
+              differenceInMinutes(parsedDate, startOfDay(new Date())) /
+                (60 * 24),
+            ),
+          );
+        }
+        return { ...prev, deadlineType: value, deadline: relativeDays };
+      }
+
+      // If changing deadline type to 'date', potentially update the date input if deadline number exists
+      if (name === "deadlineType" && value === "date") {
+        let dateValue = prev.deadlineDate;
+        if (typeof prev.deadline === "number" && prev.deadline >= 0) {
+          dateValue = format(addDays(new Date(), prev.deadline), "yyyy-MM-dd");
+        }
+        return { ...prev, deadlineType: value, deadlineDate: dateValue };
+      }
+
+      return {
+        ...prev,
+        [name]: isNumeric ? parseInt(value) || "" : value,
+      };
+    });
   };
 
   const handleBlockFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    formType: "new" | "edit",
   ) => {
     const { name, value } = e.target;
-    setNewBlockData((prev) => ({ ...prev, [name]: value }));
+    const updateFn = formType === "new" ? setNewBlockData : setEditBlockData;
+    updateFn((prev: any) => {
+      if (!prev) return null;
+      return { ...prev, [name]: value };
+    });
   };
 
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault();
+  // --- Add/Edit Submit Handlers ---
+
+  const processTaskData = (taskData: TaskFormData): Omit<Task, "id"> | null => {
     setError(null); // Clear previous errors
 
     let deadlineValue: string | number;
-    if (newTaskData.deadlineType === "date") {
-      // Combine date and a default time (e.g., end of day)
-      const datePart = newTaskData.deadlineDate; // Should be YYYY-MM-DD
+    if (taskData.deadlineType === "date") {
+      const datePart = taskData.deadlineDate;
       if (!datePart || datePart.length !== 10) {
         setError("Invalid deadline date format selected. Use YYYY-MM-DD.");
-        return;
+        return null;
       }
-      // Set deadline to 23:59:59 on the chosen LOCAL day
       deadlineValue = `${datePart}T23:59:59`;
       const parsedDeadline = parseLocalISO(deadlineValue);
       if (!parsedDeadline || parsedDeadline < startOfDay(new Date())) {
         setError("Deadline date cannot be in the past.");
-        return;
+        return null;
       }
     } else {
-      // Relative days
-      const days = parseInt(newTaskData.deadline.toString());
+      const days = parseInt(taskData.deadline.toString());
       if (isNaN(days) || days < 0) {
         setError("Deadline days must be a non-negative number.");
-        return;
+        return null;
       }
-      deadlineValue = days; // Keep as number for relative days
+      deadlineValue = days;
     }
 
-    if (!newTaskData.name.trim()) {
+    if (!taskData.name.trim()) {
       setError("Task name cannot be empty.");
-      return;
+      return null;
     }
-    const duration = parseInt(newTaskData.duration.toString());
+    const duration = parseInt(taskData.duration.toString());
     if (isNaN(duration) || duration <= 0) {
       setError("Task duration must be a positive number.");
-      return;
+      return null;
     }
 
-    const newTask: Task = {
-      id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      name: newTaskData.name.trim(),
-      priority: newTaskData.priority || 1,
+    return {
+      name: taskData.name.trim(),
+      priority: taskData.priority || 1,
       duration: duration,
-      deadline: deadlineValue, // Can be local ISO string or number
-      preference: newTaskData.preference,
+      deadline: deadlineValue,
+      preference: taskData.preference,
       // Difficulty is optional, backend will default if not sent
     };
-    setTasks((prev) => [...prev, newTask]);
-    setShowNewTaskForm(false);
-    resetNewTaskForm();
-    // No need to reset optimized state here, useEffect handles it
   };
 
-  const handleAddBlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null); // Clear previous errors
+  const processBlockData = (
+    blockData: BlockFormData,
+  ): Omit<BlockedInterval, "id"> | null => {
+    setError(null);
 
-    const startDateTimeStr = `${newBlockData.date}T${newBlockData.startTime}`;
-    const endDateTimeStr = `${newBlockData.date}T${newBlockData.endTime}`;
+    // Use date-fns parse which is more robust
+    const startDT = parse(
+      `${blockData.date} ${blockData.startTime}`,
+      "yyyy-MM-dd HH:mm",
+      new Date(),
+    );
+    const endDT = parse(
+      `${blockData.date} ${blockData.endTime}`,
+      "yyyy-MM-dd HH:mm",
+      new Date(),
+    );
 
-    const startDT = parseLocalISO(startDateTimeStr);
-    const endDT = parseLocalISO(endDateTimeStr);
-
-    if (!startDT || !endDT) {
-      setError("Invalid date or time format for blocked interval.");
-      return;
+    if (!isValid(startDT) || !isValid(endDT)) {
+      setError(
+        "Invalid date or time format for blocked interval. Use YYYY-MM-DD and HH:MM.",
+      );
+      return null;
     }
 
     if (endDT <= startDT) {
       setError("End time must be after start time for the blocked interval.");
-      return;
+      return null;
     }
-    if (!newBlockData.activity.trim()) {
+    if (!blockData.activity.trim()) {
       setError("Blocked interval activity name cannot be empty.");
-      return;
+      return null;
     }
 
-    const newBlock: BlockedInterval = {
-      id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      activity: newBlockData.activity.trim(),
-      // Store as local ISO without ms or Z
-      startTime: format(startDT, "yyyy-MM-dd'T'HH:mm:ss"),
+    return {
+      activity: blockData.activity.trim(),
+      startTime: format(startDT, "yyyy-MM-dd'T'HH:mm:ss"), // Store as local ISO without ms or Z
       endTime: format(endDT, "yyyy-MM-dd'T'HH:mm:ss"),
     };
-    setBlockedIntervals((prev) => [...prev, newBlock]);
-    setShowNewBlockForm(false);
-    resetNewBlockForm();
-    // No need to reset optimized state here, useEffect handles it
+  };
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const processedData = processTaskData(newTaskData);
+    if (processedData) {
+      const newTask: Task = {
+        id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        ...processedData,
+      };
+      setTasks((prev) => [...prev, newTask]);
+      setShowNewTaskForm(false);
+      resetNewTaskForm();
+    }
+    // If processedData is null, setError was called inside processTaskData
+  };
+
+  const handleEditTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTask || !editTaskData) return;
+
+    const processedData = processTaskData(editTaskData);
+    if (processedData) {
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === editingTask.id ? { ...task, ...processedData } : task,
+        ),
+      );
+      closeAndResetEditTaskForm();
+    }
+    // Error handled within processTaskData
+  };
+
+  const handleAddBlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    const processedData = processBlockData(newBlockData);
+    if (processedData) {
+      const newBlock: BlockedInterval = {
+        id: `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        ...processedData,
+      };
+      setBlockedIntervals((prev) => [...prev, newBlock]);
+      setShowNewBlockForm(false);
+      resetNewBlockForm();
+    }
+  };
+
+  const handleEditBlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBlock || !editBlockData) return;
+
+    const processedData = processBlockData(editBlockData);
+    if (processedData) {
+      setBlockedIntervals((prevBlocks) =>
+        prevBlocks.map((block) =>
+          block.id === editingBlock.id ? { ...block, ...processedData } : block,
+        ),
+      );
+      closeAndResetEditBlockForm();
+    }
   };
 
   // --- Delete Handlers ---
@@ -491,6 +709,15 @@ function App() {
 
   const handleDeleteBlock = (blockId: string) => {
     setBlockedIntervals((prev) => prev.filter((block) => block.id !== blockId));
+  };
+
+  // --- Edit Click Handlers ---
+  const handleEditTaskClick = (task: Task) => {
+    setEditingTask(task); // This triggers the useEffect to open the modal
+  };
+
+  const handleEditBlockClick = (block: BlockedInterval) => {
+    setEditingBlock(block); // This triggers the useEffect to open the modal
   };
 
   // --- Event Click Handler ---
@@ -611,281 +838,341 @@ function App() {
     </div>
   );
 
-  const renderNewTaskForm = () => (
+  // --- Reusable Form Components ---
+
+  const TaskFormFields: React.FC<{
+    formData: TaskFormData;
+    onChange: (
+      e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    ) => void;
+    formIdPrefix: string;
+  }> = ({ formData, onChange, formIdPrefix }) => (
+    <>
+      <div>
+        <label
+          htmlFor={`${formIdPrefix}TaskName`}
+          className="block text-sm font-medium text-gray-300 mb-1"
+        >
+          Task Name
+        </label>
+        <input
+          id={`${formIdPrefix}TaskName`}
+          name="name"
+          type="text"
+          value={formData.name}
+          onChange={onChange}
+          required
+          className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+        />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label
+            htmlFor={`${formIdPrefix}TaskPriority`}
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Priority (1=Low, 5=High)
+          </label>
+          <input
+            id={`${formIdPrefix}TaskPriority`}
+            name="priority"
+            type="number"
+            min="1"
+            max="5"
+            value={formData.priority}
+            onChange={onChange}
+            required
+            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor={`${formIdPrefix}TaskDuration`}
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Duration (minutes)
+          </label>
+          <input
+            id={`${formIdPrefix}TaskDuration`}
+            name="duration"
+            type="number"
+            min="15"
+            step="15"
+            value={formData.duration}
+            onChange={onChange}
+            required
+            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">
+          Deadline
+        </label>
+        <div className="flex items-center gap-4 bg-gray-700 p-2 rounded border border-gray-600 mb-2">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input
+              type="radio"
+              name="deadlineType"
+              value="days"
+              checked={formData.deadlineType === "days"}
+              onChange={onChange}
+              className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
+            />
+            Relative (Days from now)
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input
+              type="radio"
+              name="deadlineType"
+              value="date"
+              checked={formData.deadlineType === "date"}
+              onChange={onChange}
+              className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
+            />
+            Specific Date
+          </label>
+        </div>
+        <div className="mt-2">
+          {formData.deadlineType === "days" ? (
+            <input
+              name="deadline"
+              type="number"
+              min="0"
+              value={formData.deadline} // This is the number input
+              onChange={onChange}
+              required
+              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              placeholder="Days from today"
+            />
+          ) : (
+            <input
+              name="deadlineDate"
+              type="date"
+              value={formData.deadlineDate} // This is the date input
+              min={format(new Date(), "yyyy-MM-dd")} // Prevent past dates
+              onChange={onChange}
+              required
+              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+          )}
+        </div>
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${formIdPrefix}TaskPreference`}
+          className="block text-sm font-medium text-gray-300 mb-1"
+        >
+          Time Preference
+        </label>
+        <select
+          id={`${formIdPrefix}TaskPreference`}
+          name="preference"
+          value={formData.preference}
+          onChange={onChange}
+          className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none cursor-pointer"
+        >
+          <option value="any">Any Time</option>
+          <option value="morning">Morning (8am - 12pm)</option>
+          <option value="afternoon">Afternoon (12pm - 4pm)</option>
+          <option value="evening">Evening (4pm - 10pm)</option>
+        </select>
+      </div>
+    </>
+  );
+
+  const BlockFormFields: React.FC<{
+    formData: BlockFormData;
+    onChange: (
+      e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    ) => void;
+    formIdPrefix: string;
+  }> = ({ formData, onChange, formIdPrefix }) => (
+    <>
+      <div>
+        <label
+          htmlFor={`${formIdPrefix}BlockActivity`}
+          className="block text-sm font-medium text-gray-300 mb-1"
+        >
+          Activity Name
+        </label>
+        <input
+          id={`${formIdPrefix}BlockActivity`}
+          name="activity"
+          type="text"
+          value={formData.activity}
+          onChange={onChange}
+          required
+          className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+        />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label
+            htmlFor={`${formIdPrefix}BlockDate`}
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Date
+          </label>
+          <input
+            id={`${formIdPrefix}BlockDate`}
+            name="date"
+            type="date"
+            value={formData.date}
+            // min={format(new Date(), "yyyy-MM-dd")} // Allow past dates for editing blocks? Maybe. Keep for now.
+            onChange={onChange}
+            required
+            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label
+              htmlFor={`${formIdPrefix}BlockStartTime`}
+              className="block text-sm font-medium text-gray-300 mb-1"
+            >
+              Start Time
+            </label>
+            <input
+              id={`${formIdPrefix}BlockStartTime`}
+              name="startTime"
+              type="time"
+              step="900" // 15 minute steps
+              value={formData.startTime}
+              onChange={onChange}
+              required
+              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${formIdPrefix}BlockEndTime`}
+              className="block text-sm font-medium text-gray-300 mb-1"
+            >
+              End Time
+            </label>
+            <input
+              id={`${formIdPrefix}BlockEndTime`}
+              name="endTime"
+              type="time"
+              step="900" // 15 minute steps
+              value={formData.endTime}
+              onChange={onChange}
+              required
+              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  // --- Render Modal Forms ---
+
+  const renderModalWrapper = (
+    title: string,
+    onClose: () => void,
+    onSubmit: (e: React.FormEvent) => void,
+    submitText: string,
+    children: React.ReactNode,
+    currentError: string | null,
+  ) => (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-gray-800 p-6 rounded-xl w-full max-w-lg shadow-2xl border border-gray-700 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6 sticky top-0 bg-gray-800 pt-1 pb-3 -mt-1 z-10">
-          <h3 className="text-2xl font-semibold">Add New Task</h3>
+          <h3 className="text-2xl font-semibold">{title}</h3>
           <button
-            onClick={() => {
-              setShowNewTaskForm(false);
-              resetNewTaskForm();
-              setError(null);
-            }}
+            onClick={onClose}
             className="text-gray-400 hover:text-white transition-colors p-1 rounded-full hover:bg-gray-700"
           >
             <X className="w-6 h-6" />
           </button>
         </div>
-        <form onSubmit={handleAddTask} className="space-y-4 pb-2">
-          {/* Form fields - adjusted styling slightly */}
-          <div>
-            <label
-              htmlFor="taskName"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Task Name
-            </label>
-            <input
-              id="taskName"
-              name="name"
-              type="text"
-              value={newTaskData.name}
-              onChange={handleTaskFormChange}
-              required
-              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label
-                htmlFor="taskPriority"
-                className="block text-sm font-medium text-gray-300 mb-1"
-              >
-                Priority (1=Low, 5=High)
-              </label>
-              <input
-                id="taskPriority"
-                name="priority"
-                type="number"
-                min="1"
-                max="5"
-                value={newTaskData.priority}
-                onChange={handleTaskFormChange}
-                required
-                className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="taskDuration"
-                className="block text-sm font-medium text-gray-300 mb-1"
-              >
-                Duration (minutes)
-              </label>
-              <input
-                id="taskDuration"
-                name="duration"
-                type="number"
-                min="15"
-                step="15"
-                value={newTaskData.duration}
-                onChange={handleTaskFormChange}
-                required
-                className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Deadline
-            </label>
-            <div className="flex items-center gap-4 bg-gray-700 p-2 rounded border border-gray-600 mb-2">
-              <label className="flex items-center gap-2 cursor-pointer text-sm">
-                <input
-                  type="radio"
-                  name="deadlineType"
-                  value="days"
-                  checked={newTaskData.deadlineType === "days"}
-                  onChange={handleTaskFormChange}
-                  className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
-                />
-                Relative (Days from now)
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-sm">
-                <input
-                  type="radio"
-                  name="deadlineType"
-                  value="date"
-                  checked={newTaskData.deadlineType === "date"}
-                  onChange={handleTaskFormChange}
-                  className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
-                />
-                Specific Date
-              </label>
-            </div>
-            <div className="mt-2">
-              {newTaskData.deadlineType === "days" ? (
-                <input
-                  name="deadline"
-                  type="number"
-                  min="0"
-                  value={newTaskData.deadline}
-                  onChange={handleTaskFormChange}
-                  required
-                  className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Days from today"
-                />
-              ) : (
-                <input
-                  name="deadlineDate"
-                  type="date"
-                  value={newTaskData.deadlineDate}
-                  min={format(new Date(), "yyyy-MM-dd")} // Prevent past dates
-                  onChange={handleTaskFormChange}
-                  required
-                  className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label
-              htmlFor="taskPreference"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Time Preference
-            </label>
-            <select
-              id="taskPreference"
-              name="preference"
-              value={newTaskData.preference}
-              onChange={handleTaskFormChange}
-              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none cursor-pointer"
-            >
-              <option value="any">Any Time</option>
-              <option value="morning">Morning (8am - 12pm)</option>
-              <option value="afternoon">Afternoon (12pm - 4pm)</option>
-              <option value="evening">Evening (4pm - 10pm)</option>
-            </select>
-          </div>
+        <form onSubmit={onSubmit} className="space-y-4 pb-2">
+          {children}
           {/* Error Display within Modal */}
-          {error && (
+          {currentError && (
             <div className="bg-red-900 border border-red-700 text-red-300 px-3 py-2 rounded text-sm mt-2">
-              {error}
+              {currentError}
             </div>
           )}
           <button
             type="submit"
             className="w-full bg-purple-600 hover:bg-purple-700 py-2.5 rounded-lg mt-6 transition-colors font-semibold text-base"
           >
-            Add Task
+            {submitText}
           </button>
         </form>
       </div>
     </div>
   );
 
-  const renderNewBlockForm = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-gray-800 p-6 rounded-xl w-full max-w-lg shadow-2xl border border-gray-700 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-6 sticky top-0 bg-gray-800 pt-1 pb-3 -mt-1 z-10">
-          <h3 className="text-2xl font-semibold">Add Blocked Time</h3>
-          <button
-            onClick={() => {
-              setShowNewBlockForm(false);
-              resetNewBlockForm();
-              setError(null);
-            }}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded-full hover:bg-gray-700"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-        <form onSubmit={handleAddBlock} className="space-y-4 pb-2">
-          {/* Form fields - adjusted styling slightly */}
-          <div>
-            <label
-              htmlFor="blockActivity"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Activity Name
-            </label>
-            <input
-              id="blockActivity"
-              name="activity"
-              type="text"
-              value={newBlockData.activity}
-              onChange={handleBlockFormChange}
-              required
-              className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label
-                htmlFor="blockDate"
-                className="block text-sm font-medium text-gray-300 mb-1"
-              >
-                Date
-              </label>
-              <input
-                id="blockDate"
-                name="date"
-                type="date"
-                value={newBlockData.date}
-                min={format(new Date(), "yyyy-MM-dd")} // Prevent past dates
-                onChange={handleBlockFormChange}
-                required
-                className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label
-                  htmlFor="blockStartTime"
-                  className="block text-sm font-medium text-gray-300 mb-1"
-                >
-                  Start Time
-                </label>
-                <input
-                  id="blockStartTime"
-                  name="startTime"
-                  type="time"
-                  step="900" // 15 minute steps
-                  value={newBlockData.startTime}
-                  onChange={handleBlockFormChange}
-                  required
-                  className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="blockEndTime"
-                  className="block text-sm font-medium text-gray-300 mb-1"
-                >
-                  End Time
-                </label>
-                <input
-                  id="blockEndTime"
-                  name="endTime"
-                  type="time"
-                  step="900" // 15 minute steps
-                  value={newBlockData.endTime}
-                  onChange={handleBlockFormChange}
-                  required
-                  className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-          </div>
-          {/* Error Display within Modal */}
-          {error && (
-            <div className="bg-red-900 border border-red-700 text-red-300 px-3 py-2 rounded text-sm mt-2">
-              {error}
-            </div>
-          )}
-          <button
-            type="submit"
-            className="w-full bg-purple-600 hover:bg-purple-700 py-2.5 rounded-lg mt-6 transition-colors font-semibold text-base"
-          >
-            Add Blocked Time
-          </button>
-        </form>
-      </div>
-    </div>
-  );
+  const renderNewTaskForm = () =>
+    renderModalWrapper(
+      "Add New Task",
+      () => {
+        setShowNewTaskForm(false);
+        resetNewTaskForm();
+        setError(null);
+      },
+      handleAddTask,
+      "Add Task",
+      <TaskFormFields
+        formData={newTaskData}
+        onChange={(e) => handleTaskFormChange(e, "new")}
+        formIdPrefix="new"
+      />,
+      error, // Pass current global error state to modal
+    );
+
+  const renderEditTaskForm = () =>
+    editTaskData &&
+    renderModalWrapper(
+      "Edit Task",
+      closeAndResetEditTaskForm,
+      handleEditTask,
+      "Save Changes",
+      <TaskFormFields
+        formData={editTaskData}
+        onChange={(e) => handleTaskFormChange(e, "edit")}
+        formIdPrefix="edit"
+      />,
+      error, // Pass current global error state to modal
+    );
+
+  const renderNewBlockForm = () =>
+    renderModalWrapper(
+      "Add Blocked Time",
+      () => {
+        setShowNewBlockForm(false);
+        resetNewBlockForm();
+        setError(null);
+      },
+      handleAddBlock,
+      "Add Blocked Time",
+      <BlockFormFields
+        formData={newBlockData}
+        onChange={(e) => handleBlockFormChange(e, "new")}
+        formIdPrefix="new"
+      />,
+      error, // Pass current global error state to modal
+    );
+
+  const renderEditBlockForm = () =>
+    editBlockData &&
+    renderModalWrapper(
+      "Edit Blocked Time",
+      closeAndResetEditBlockForm,
+      handleEditBlock,
+      "Save Changes",
+      <BlockFormFields
+        formData={editBlockData}
+        onChange={(e) => handleBlockFormChange(e, "edit")}
+        formIdPrefix="edit"
+      />,
+      error, // Pass current global error state to modal
+    );
 
   const renderTasks = () => (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg">
@@ -925,17 +1212,23 @@ function App() {
         </p>
       )}
       <div className="overflow-x-auto max-h-96">
-        {" "}
-        {/* Added max-h and overflow */}
-        <table className="w-full min-w-[650px] border-separate border-spacing-y-1">
+        <table className="w-full min-w-[700px] border-separate border-spacing-y-1">
+          {" "}
+          {/* Increased min-width */}
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
               <th className="pb-2 px-3 font-medium">Name</th>
-              <th className="pb-2 px-3 font-medium text-center">Priority</th>
-              <th className="pb-2 px-3 font-medium text-center">Duration</th>
+              <th className="pb-2 px-3 font-medium text-center">Prio</th>{" "}
+              {/* Shorter Header */}
+              <th className="pb-2 px-3 font-medium text-center">Dur</th>{" "}
+              {/* Shorter Header */}
               <th className="pb-2 px-3 font-medium">Deadline</th>
-              <th className="pb-2 px-3 font-medium">Preference</th>
-              <th className="pb-2 px-1 font-medium text-center">Actions</th>
+              <th className="pb-2 px-3 font-medium">Pref</th>{" "}
+              {/* Shorter Header */}
+              <th className="pb-2 px-1 font-medium text-center w-20">
+                Actions
+              </th>{" "}
+              {/* Fixed width */}
             </tr>
           </thead>
           <tbody>
@@ -946,19 +1239,33 @@ function App() {
               >
                 <td className="py-2.5 px-3 rounded-l-lg">{task.name}</td>
                 <td className="py-2.5 px-3 text-center">{task.priority}</td>
-                <td className="py-2.5 px-3 text-center">{task.duration} min</td>
+                <td className="py-2.5 px-3 text-center">
+                  {task.duration}
+                  <span className="text-xs text-gray-400">m</span>
+                </td>
                 <td className="py-2.5 px-3 text-xs">
                   {getDeadlineDisplay(task.deadline)}
                 </td>
-                <td className="py-2.5 px-3 capitalize">{task.preference}</td>
+                <td className="py-2.5 px-3 capitalize text-xs">
+                  {task.preference}
+                </td>
                 <td className="py-2.5 px-1 text-center rounded-r-lg">
-                  <button
-                    onClick={() => handleDeleteTask(task.id)}
-                    title="Delete Task"
-                    className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex justify-center items-center gap-1.5">
+                    <button
+                      onClick={() => handleEditTaskClick(task)}
+                      title="Edit Task"
+                      className="p-1 text-gray-400 hover:text-blue-400 transition-colors rounded-full hover:bg-gray-600"
+                    >
+                      <Edit size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTask(task.id)}
+                      title="Delete Task"
+                      className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -990,15 +1297,18 @@ function App() {
         </p>
       )}
       <div className="overflow-x-auto max-h-96">
-        {" "}
-        {/* Added max-h and overflow */}
-        <table className="w-full min-w-[550px] border-separate border-spacing-y-1">
+        <table className="w-full min-w-[600px] border-separate border-spacing-y-1">
+          {" "}
+          {/* Increased min-width */}
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
               <th className="pb-2 px-3 font-medium">Activity</th>
               <th className="pb-2 px-3 font-medium">Start Time</th>
               <th className="pb-2 px-3 font-medium">End Time</th>
-              <th className="pb-2 px-1 font-medium text-center">Actions</th>
+              <th className="pb-2 px-1 font-medium text-center w-20">
+                Actions
+              </th>{" "}
+              {/* Fixed width */}
             </tr>
           </thead>
           <tbody>
@@ -1029,13 +1339,22 @@ function App() {
                     )}
                   </td>
                   <td className="py-2.5 px-1 text-center rounded-r-lg">
-                    <button
-                      onClick={() => handleDeleteBlock(interval.id)}
-                      title="Delete Blocked Time"
-                      className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex justify-center items-center gap-1.5">
+                      <button
+                        onClick={() => handleEditBlockClick(interval)}
+                        title="Edit Blocked Time"
+                        className="p-1 text-gray-400 hover:text-blue-400 transition-colors rounded-full hover:bg-gray-600"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteBlock(interval.id)}
+                        title="Delete Blocked Time"
+                        className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1170,7 +1489,7 @@ function App() {
               optimizationResult.status === "Optimal" ||
               optimizationResult.status === "Feasible"
                 ? "bg-green-900 border-green-700 text-green-200"
-                : "bg-yellow-900 border-yellow-700 text-yellow-200" // Keep yellow for non-optimal feasible? Maybe orange?
+                : "bg-yellow-900 border-yellow-700 text-yellow-200"
             }`}
           >
             <p className="flex items-center gap-1.5">
@@ -1188,7 +1507,6 @@ function App() {
               )}
             </p>
 
-            {/* Show solver message only if it's not a simple success message */}
             {optimizationResult.message &&
               !optimizationResult.message.toLowerCase().includes("success") && (
                 <p className="mt-1 text-xs opacity-90">
@@ -1240,10 +1558,10 @@ function App() {
                 className="sticky top-0 z-30 bg-gray-800 h-14 p-2 text-center border-b border-r border-gray-700 flex flex-col justify-center items-center"
               >
                 <div className="font-medium text-sm leading-tight">
-                  {format(day, "EEE")} {/* Mon, Tue, etc. */}
+                  {format(day, "EEE")}
                 </div>
                 <div className="text-xs text-gray-400 leading-tight">
-                  {format(day, "d MMM")} {/* 10 Jun, etc. */}
+                  {format(day, "d MMM")}
                 </div>
               </div>
             ))}
@@ -1393,7 +1711,6 @@ function App() {
                   </strong>{" "}
                   <span className="capitalize">{selectedEvent.preference}</span>
                 </p>
-                {/* You could potentially show the original deadline here if needed */}
               </>
             )}
           </div>
@@ -1422,6 +1739,8 @@ function App() {
         {error &&
           !showNewBlockForm &&
           !showNewTaskForm &&
+          !showEditBlockForm &&
+          !showEditTaskForm &&
           !(
             optimizationResult.status &&
             ["Error", "Infeasible", "Not Solved"].includes(
@@ -1461,12 +1780,15 @@ function App() {
           </>
         )}
 
+        {/* Render Modals */}
         {showNewTaskForm && renderNewTaskForm()}
         {showNewBlockForm && renderNewBlockForm()}
+        {showEditTaskForm && renderEditTaskForm()}
+        {showEditBlockForm && renderEditBlockForm()}
         {renderEventDetailsModal()}
       </div>
       <footer className="text-center text-xs text-gray-500 mt-12 pb-4">
-        IntelliSchedule v1.1 - React + Flask + PuLP
+        IntelliSchedule v1.2 - React + Flask + PuLP
       </footer>
     </div>
   );
