@@ -132,9 +132,9 @@ See the Mermaid diagram below for a visual representation.
 ```mermaid
 graph TD
     subgraph Inputs
-        A1[Tasks (priority, duration, deadline, preference, difficulty, id)]
-        A2[Blocked Intervals (startTime, endTime, activity, id)]
-        A3[Settings (alpha, beta, daily_limit?)]
+        A1["Tasks (priority, duration, deadline, preference, difficulty, id)"]
+        A2["Blocked Intervals (startTime, endTime, activity, id)"]
+        A3["Settings (alpha, beta, daily_limit?)"]
     end
 
     subgraph Preprocessing
@@ -193,7 +193,7 @@ graph TD
     Inputs --> Preprocessing
     Preprocessing --> Model Definition
     Model Definition --> D1
-    D2 --> Postprocessing[Format Results]
+    D2 --> Postprocessing["Format Results"]
     Postprocessing --> Outputs
 
     %% Relationships / Dependencies
