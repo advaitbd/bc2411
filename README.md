@@ -132,77 +132,57 @@ See the Mermaid diagram below for a visual representation.
 ```mermaid
 graph TD
     subgraph Inputs
-        A1["Tasks (priority, duration, deadline, preference, difficulty, id)"]
-        A2["Blocked Intervals (startTime, endTime, activity, id)"]
-        A3["Settings (alpha, beta, daily_limit?)"]
+        tasks["🗒️ Tasks"]
+        blocked["⛔ Blocked Intervals"]
+        settings["⚙️ Settings (α, β, daily_limit)"]
     end
 
     subgraph Preprocessing
-        B1{"Convert Times/Durations to Slots"}
-        B2{"Map Preferences to Allowed Slot Sets"}
-        B3{"Create Commitment Slot Set"}
-        B4{"Validate Inputs (Deadlines, Durations)"}
-
-        A1 --> B1
-        A2 --> B1
-        A1 --> B2
-        A2 --> B3
-        A1 --> B4
+        times["⌚ Convert Times & Durations to Slots"]
+        prefs["⭐ Map Preferences"]
+        commitments["📌 Commitment Slots"]
+        validate["✅ Validate Inputs"]
     end
 
-    subgraph Model_Definition["Model Definition"]
-        C1["Decision Variables"]
-        C1_1["X[i, s]: Task 'i' starts at slot 's' (Binary)"]
-        C1_2["Y[s]: Slot 's' occupied by *any* task (Binary)"]
-        C1_3["L[s]: Leisure minutes in slot 's' (Continuous 0-15)"]
+    subgraph Optimization_Model["📈 Optimization Model"]
+        vars["📌 Decision Variables"]
+        objective["🎯 Objective"]
+        constraints["🔗 Constraints"]
 
-        C2["Objective Function"]
-        C2_1["Maximize: α * Σ L[s] - β * Σ (X[i,s] * P[i] * D[i])"]
-        C2_2["(Maximize Leisure - Minimize Stress)"]
-
-        C3["Constraints"]
-        C3_1["1. Task Assignment (Σ X[i, s] == 1 for each i)"]
-        C3_2["2. Deadlines (Task 'i' finishes by deadline_slot[i])"]
-        C3_3["3. No Task Overlap (Σ Occupying Tasks <= 1 for each slot)"]
-        C3_4["4. Preferences (X[i, s] = 0 if 's' not allowed for preference[i])"]
-        C3_5["5. Commitments (X[i, s] = 0 if task 'i' at 's' overlaps commitment)"]
-        C3_6["6. Leisure Link (L[s] <= 15 * (1 - Y[s]) * (1 - IsCommitted[s]))"]
-        C3_7["7. Link Y[s] to X[i, s] (Y[s] = 1 if any task occupies slot 's')"]
-        C3_8["8. Daily Limit (Optional: Σ Y[s] <= limit for each day)"]
-
-        C1 --> C1_1 & C1_2 & C1_3
-        C1_1 --> C2 & C3
-        C1_2 --> C3_6 & C3_7 & C3_8
-        C1_3 --> C2 & C3_6
+        vars --> objective
+        vars --> constraints
     end
 
     subgraph Solver
-        D1["PuLP Model Formulation"]
-        D2{"CBC Solver Engine"}
-        D1 --> D2
+        pulp["📐 PuLP Model"]
+        cbc["🧩 CBC Solver"]
+        pulp --> cbc
     end
 
     subgraph Outputs
-        E1{"Solver Status (Optimal, Feasible, Infeasible)"}
-        E2["Optimized Schedule (Tasks with start/end times/slots)"]
-        E3["Total Leisure Value"]
-        E4["Total Stress Score"]
-        E5["Warnings (from input processing)"]
+        status["🚦 Solver Status"]
+        schedule["📅 Optimized Schedule"]
+        leisure["🛌 Total Leisure"]
+        stress["😓 Total Stress"]
+        warnings["⚠️ Warnings"]
     end
 
+    %% Main Flow
     Inputs --> Preprocessing
-    Preprocessing --> Model_Definition
-    Model_Definition --> D1
-    D2 --> Postprocessing["Format Results"]
-    Postprocessing --> Outputs
+    Preprocessing --> Optimization_Model
+    Optimization_Model --> pulp
+    cbc --> Outputs
 
-    %% Relationships / Dependencies
-    B1 --> C3_2 & C3_3 & C3_5 & C3_6 & C3_7 & C3_8
-    B2 --> C3_4
-    B3 --> C3_5 & C3_6
-    A3 --> C2
-    A3 --> C3_8
+    %% Detailed connections
+    tasks --> times & prefs & validate
+    blocked --> times & commitments
+    settings --> objective & constraints
 
+    %% Preprocessing details
+    times --> constraints
+    prefs --> constraints
+    commitments --> constraints
+    validate --> warnings
 ```
 
 ## Project Structure
