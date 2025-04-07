@@ -4,6 +4,9 @@ This project is a web application designed to help users schedule their tasks in
 
 The application features a React frontend with a weekly calendar view and a Flask backend powered by the PuLP optimization library.
 
+![image](https://github.com/user-attachments/assets/26ec677a-5189-4011-aa31-5010617d0e9c)
+
+
 ## Key Features
 
 *   **Task Management:** Add tasks with details like name, priority (1-5), duration (minutes), deadline (relative days or specific date), and time preference (morning, afternoon, evening, any).
