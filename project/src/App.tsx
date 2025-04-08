@@ -15,7 +15,7 @@ import {
   ArrowRight,
   Info,
   Trash2,
-  Edit, // Added Edit icon
+  Edit,
 } from "lucide-react";
 import {
   format,
@@ -27,9 +27,11 @@ import {
   differenceInMinutes,
   isValid,
   startOfDay,
-  // endOfDay, // Might be useful, not currently used
-  parse, // Added for parsing date/time inputs
+  parse,
 } from "date-fns";
+
+// --- Import the new component ---
+import ScheduledTasksList from "./ScheduledTasksList";
 
 // Assume backend returns naive local ISO strings (no 'Z' or offset)
 const API_BASE_URL = "http://localhost:5001/api"; // Backend URL
@@ -233,30 +235,25 @@ function App() {
       if (typeof editingTask.deadline === "number") {
         deadlineType = "days";
         deadlineValue = editingTask.deadline;
-        // Calculate an approximate date for the date input, though it won't be used if 'days' is selected
         deadlineDateValue = format(
           addDays(new Date(), editingTask.deadline),
           "yyyy-MM-dd",
         );
       } else {
-        // It's a string (ISO format)
         const parsedDate = parseLocalISO(editingTask.deadline);
         if (parsedDate) {
           deadlineDateValue = format(parsedDate, "yyyy-MM-dd");
-          deadlineValue = editingTask.deadline; // Keep the original string for potential use? Maybe not needed.
-          // Default relative days if switching back
           const relativeDays = Math.ceil(
             differenceInMinutes(parsedDate, startOfDay(new Date())) / (60 * 24),
           );
-          deadlineValue = Math.max(0, relativeDays); // Use calculated relative days for the number input
+          deadlineValue = Math.max(0, relativeDays);
         } else {
-          // Handle invalid date string case - default to relative?
           console.warn(
             "Invalid deadline string found while editing task:",
             editingTask.deadline,
           );
           deadlineType = "days";
-          deadlineValue = 3; // Default to 3 days if date was invalid
+          deadlineValue = 3;
           deadlineDateValue = format(addDays(new Date(), 3), "yyyy-MM-dd");
         }
       }
@@ -265,10 +262,10 @@ function App() {
         name: editingTask.name,
         priority: editingTask.priority,
         duration: editingTask.duration,
-        deadline: deadlineValue, // Set the number input value correctly
+        deadline: deadlineValue,
         deadlineType: deadlineType,
         preference: editingTask.preference,
-        deadlineDate: deadlineDateValue, // Set the date input value
+        deadlineDate: deadlineDateValue,
       });
       setShowEditTaskForm(true);
     } else {
@@ -301,11 +298,11 @@ function App() {
   const resetNewTaskForm = () => setNewTaskData(defaultTaskData);
   const resetNewBlockForm = () => setNewBlockData(defaultBlockData);
   const closeAndResetEditTaskForm = () => {
-    setEditingTask(null); // This triggers the useEffect to close the modal
+    setEditingTask(null);
     setError(null);
   };
   const closeAndResetEditBlockForm = () => {
-    setEditingBlock(null); // This triggers the useEffect to close the modal
+    setEditingBlock(null);
     setError(null);
   };
 
@@ -327,18 +324,16 @@ function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/auto-generate`);
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})); // Try to get error details
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(
           errorData.error || `HTTP error! status: ${response.status}`,
         );
       }
       const data = await response.json();
       console.log("Auto-generated data:", data);
-
-      // Tasks and Blocked Intervals now use naive local ISO strings
       setTasks(data.tasks);
       setBlockedIntervals(data.blockedIntervals);
-      setMode("auto"); // Set mode after data is fetched
+      setMode("auto");
     } catch (err) {
       console.error("Failed to auto-generate:", err);
       setError(
@@ -346,9 +341,9 @@ function App() {
           ? err.message
           : "Failed to fetch auto-generated data.",
       );
-      setTasks([]); // Clear data on error
+      setTasks([]);
       setBlockedIntervals([]);
-      setMode(null); // Reset mode
+      setMode(null);
     } finally {
       setIsLoading(false);
     }
@@ -357,7 +352,7 @@ function App() {
   const handleOptimize = async () => {
     setIsLoading(true);
     setError(null);
-    setOptimizedSchedule({}); // Clear previous schedule
+    setOptimizedSchedule({});
     setIsOptimized(false);
     setOptimizationResult({
       totalLeisure: null,
@@ -367,10 +362,8 @@ function App() {
       warnings: null,
     });
 
-    // --- Prepare data for backend ---
     const tasksToSend = tasks.map((task) => ({
       ...task,
-      // Deadline is already string (local ISO) or number (days)
       deadline: task.deadline,
     }));
 
@@ -378,8 +371,8 @@ function App() {
       tasks: tasksToSend,
       blockedIntervals: blockedIntervals,
       settings: {
-        startHour: startHour, // Send user preference
-        endHour: endHour, // Send user preference
+        startHour: startHour,
+        endHour: endHour,
       },
     };
 
@@ -409,7 +402,7 @@ function App() {
       ) {
         const scheduleByDate: OptimizedSchedule = {};
         result.schedule.forEach((item: ScheduledTaskItem) => {
-          const startTime = parseLocalISO(item.startTime); // Parse as local
+          const startTime = parseLocalISO(item.startTime);
           if (startTime) {
             const dateKey = format(startTime, "yyyy-MM-dd");
             if (!scheduleByDate[dateKey]) {
@@ -424,7 +417,6 @@ function App() {
           }
         });
 
-        // Sort items within each day by start time
         Object.keys(scheduleByDate).forEach((dateKey) => {
           scheduleByDate[dateKey].sort((a, b) => {
             const timeA = parseLocalISO(a.startTime)?.getTime() || 0;
@@ -474,7 +466,7 @@ function App() {
 
   const handleManualMode = () => {
     setMode("manual");
-    setTasks([]); // Start with empty lists in manual mode
+    setTasks([]);
     setBlockedIntervals([]);
     setOptimizedSchedule({});
     setIsOptimized(false);
@@ -497,10 +489,8 @@ function App() {
     const updateFn = formType === "new" ? setNewTaskData : setEditTaskData;
 
     updateFn((prev: any) => {
-      // Use any temporarily, better to type check prev != null for edit
-      if (!prev) return null; // Should not happen for edit if modal is open
+      if (!prev) return null;
 
-      // Special handling for radio buttons
       if (name === "deadlineType") {
         return { ...prev, deadlineType: value };
       }
@@ -508,13 +498,11 @@ function App() {
       const isNumeric =
         ["priority", "duration", "deadline"].includes(name) &&
         type !== "select" &&
-        name !== "deadlineDate"; // Exclude the date input itself
+        name !== "deadlineDate";
 
-      // If changing deadline type to 'days', update the 'deadline' number input
       if (name === "deadlineType" && value === "days") {
-        // Try to parse the current date input to calculate relative days
         const parsedDate = parseLocalISO(`${prev.deadlineDate}T00:00:00`);
-        let relativeDays = 3; // Default
+        let relativeDays = 3;
         if (parsedDate) {
           relativeDays = Math.max(
             0,
@@ -527,7 +515,6 @@ function App() {
         return { ...prev, deadlineType: value, deadline: relativeDays };
       }
 
-      // If changing deadline type to 'date', potentially update the date input if deadline number exists
       if (name === "deadlineType" && value === "date") {
         let dateValue = prev.deadlineDate;
         if (typeof prev.deadline === "number" && prev.deadline >= 0) {
@@ -558,7 +545,7 @@ function App() {
   // --- Add/Edit Submit Handlers ---
 
   const processTaskData = (taskData: TaskFormData): Omit<Task, "id"> | null => {
-    setError(null); // Clear previous errors
+    setError(null);
 
     let deadlineValue: string | number;
     if (taskData.deadlineType === "date") {
@@ -598,7 +585,6 @@ function App() {
       duration: duration,
       deadline: deadlineValue,
       preference: taskData.preference,
-      // Difficulty is optional, backend will default if not sent
     };
   };
 
@@ -607,7 +593,6 @@ function App() {
   ): Omit<BlockedInterval, "id"> | null => {
     setError(null);
 
-    // Use date-fns parse which is more robust
     const startDT = parse(
       `${blockData.date} ${blockData.startTime}`,
       "yyyy-MM-dd HH:mm",
@@ -637,7 +622,7 @@ function App() {
 
     return {
       activity: blockData.activity.trim(),
-      startTime: format(startDT, "yyyy-MM-dd'T'HH:mm:ss"), // Store as local ISO without ms or Z
+      startTime: format(startDT, "yyyy-MM-dd'T'HH:mm:ss"),
       endTime: format(endDT, "yyyy-MM-dd'T'HH:mm:ss"),
     };
   };
@@ -654,7 +639,6 @@ function App() {
       setShowNewTaskForm(false);
       resetNewTaskForm();
     }
-    // If processedData is null, setError was called inside processTaskData
   };
 
   const handleEditTask = (e: React.FormEvent) => {
@@ -670,7 +654,6 @@ function App() {
       );
       closeAndResetEditTaskForm();
     }
-    // Error handled within processTaskData
   };
 
   const handleAddBlock = (e: React.FormEvent) => {
@@ -713,18 +696,18 @@ function App() {
 
   // --- Edit Click Handlers ---
   const handleEditTaskClick = (task: Task) => {
-    setEditingTask(task); // This triggers the useEffect to open the modal
+    setEditingTask(task);
   };
 
   const handleEditBlockClick = (block: BlockedInterval) => {
-    setEditingBlock(block); // This triggers the useEffect to open the modal
+    setEditingBlock(block);
   };
 
   // --- Event Click Handler ---
   const handleEventClick = (eventData: ScheduledTaskItem | BlockedInterval) => {
     console.log(`Clicked event:`, eventData);
     setSelectedEvent(eventData);
-    setShowEventDetailsModal(true); // Show the modal
+    setShowEventDetailsModal(true);
   };
 
   // --- Helper to get deadline display string ---
@@ -732,10 +715,8 @@ function App() {
     if (typeof deadline === "number") {
       return `In ${deadline} day(s)`;
     }
-    // Assumes deadline is a naive local ISO string
     const dt = parseLocalISO(deadline);
     if (dt) {
-      // Format appropriately, maybe relative if close
       const now = new Date();
       const diffDays = differenceInMinutes(dt, now) / (60 * 24);
       if (diffDays < 0) return `Overdue (${format(dt, "MMM d, HH:mm")})`;
@@ -784,17 +765,14 @@ function App() {
           <select
             id="endHour"
             value={endHour}
-            // Ensure endHour is always after startHour
             onChange={(e) =>
               setEndHour(Math.max(startHour + 1, parseInt(e.target.value)))
             }
             className="bg-gray-700 rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-purple-400 appearance-none cursor-pointer border border-gray-600"
           >
-            {/* Allow selecting up to hour 24 (representing end of day 23:59) */}
             {Array.from({ length: 24 }, (_, i) => i + 1).map((hour) => (
               <option key={hour} value={hour} disabled={hour <= startHour}>
-                {`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}{" "}
-                {/* Display 24:00 */}
+                {`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}
               </option>
             ))}
           </select>
@@ -837,8 +815,6 @@ function App() {
       </div>
     </div>
   );
-
-  // --- Reusable Form Components ---
 
   const TaskFormFields: React.FC<{
     formData: TaskFormData;
@@ -939,7 +915,7 @@ function App() {
               name="deadline"
               type="number"
               min="0"
-              value={formData.deadline} // This is the number input
+              value={formData.deadline}
               onChange={onChange}
               required
               className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -949,8 +925,8 @@ function App() {
             <input
               name="deadlineDate"
               type="date"
-              value={formData.deadlineDate} // This is the date input
-              min={format(new Date(), "yyyy-MM-dd")} // Prevent past dates
+              value={formData.deadlineDate}
+              min={format(new Date(), "yyyy-MM-dd")}
               onChange={onChange}
               required
               className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -1020,7 +996,6 @@ function App() {
             name="date"
             type="date"
             value={formData.date}
-            // min={format(new Date(), "yyyy-MM-dd")} // Allow past dates for editing blocks? Maybe. Keep for now.
             onChange={onChange}
             required
             className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -1038,7 +1013,7 @@ function App() {
               id={`${formIdPrefix}BlockStartTime`}
               name="startTime"
               type="time"
-              step="900" // 15 minute steps
+              step="900"
               value={formData.startTime}
               onChange={onChange}
               required
@@ -1056,7 +1031,7 @@ function App() {
               id={`${formIdPrefix}BlockEndTime`}
               name="endTime"
               type="time"
-              step="900" // 15 minute steps
+              step="900"
               value={formData.endTime}
               onChange={onChange}
               required
@@ -1067,8 +1042,6 @@ function App() {
       </div>
     </>
   );
-
-  // --- Render Modal Forms ---
 
   const renderModalWrapper = (
     title: string,
@@ -1091,7 +1064,6 @@ function App() {
         </div>
         <form onSubmit={onSubmit} className="space-y-4 pb-2">
           {children}
-          {/* Error Display within Modal */}
           {currentError && (
             <div className="bg-red-900 border border-red-700 text-red-300 px-3 py-2 rounded text-sm mt-2">
               {currentError}
@@ -1123,7 +1095,7 @@ function App() {
         onChange={(e) => handleTaskFormChange(e, "new")}
         formIdPrefix="new"
       />,
-      error, // Pass current global error state to modal
+      error,
     );
 
   const renderEditTaskForm = () =>
@@ -1138,7 +1110,7 @@ function App() {
         onChange={(e) => handleTaskFormChange(e, "edit")}
         formIdPrefix="edit"
       />,
-      error, // Pass current global error state to modal
+      error,
     );
 
   const renderNewBlockForm = () =>
@@ -1156,7 +1128,7 @@ function App() {
         onChange={(e) => handleBlockFormChange(e, "new")}
         formIdPrefix="new"
       />,
-      error, // Pass current global error state to modal
+      error,
     );
 
   const renderEditBlockForm = () =>
@@ -1171,7 +1143,7 @@ function App() {
         onChange={(e) => handleBlockFormChange(e, "edit")}
         formIdPrefix="edit"
       />,
-      error, // Pass current global error state to modal
+      error,
     );
 
   const renderTasks = () => (
@@ -1213,22 +1185,16 @@ function App() {
       )}
       <div className="overflow-x-auto max-h-96">
         <table className="w-full min-w-[700px] border-separate border-spacing-y-1">
-          {" "}
-          {/* Increased min-width */}
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
               <th className="pb-2 px-3 font-medium">Name</th>
-              <th className="pb-2 px-3 font-medium text-center">Prio</th>{" "}
-              {/* Shorter Header */}
-              <th className="pb-2 px-3 font-medium text-center">Dur</th>{" "}
-              {/* Shorter Header */}
+              <th className="pb-2 px-3 font-medium text-center">Prio</th>
+              <th className="pb-2 px-3 font-medium text-center">Dur</th>
               <th className="pb-2 px-3 font-medium">Deadline</th>
-              <th className="pb-2 px-3 font-medium">Pref</th>{" "}
-              {/* Shorter Header */}
+              <th className="pb-2 px-3 font-medium">Pref</th>
               <th className="pb-2 px-1 font-medium text-center w-20">
                 Actions
-              </th>{" "}
-              {/* Fixed width */}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1298,8 +1264,6 @@ function App() {
       )}
       <div className="overflow-x-auto max-h-96">
         <table className="w-full min-w-[600px] border-separate border-spacing-y-1">
-          {" "}
-          {/* Increased min-width */}
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
               <th className="pb-2 px-3 font-medium">Activity</th>
@@ -1307,8 +1271,7 @@ function App() {
               <th className="pb-2 px-3 font-medium">End Time</th>
               <th className="pb-2 px-1 font-medium text-center w-20">
                 Actions
-              </th>{" "}
-              {/* Fixed width */}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1317,7 +1280,7 @@ function App() {
                 const timeA = parseLocalISO(a.startTime)?.getTime() || 0;
                 const timeB = parseLocalISO(b.startTime)?.getTime() || 0;
                 return timeA - timeB;
-              }) // Sort by start time
+              })
               .map((interval) => (
                 <tr
                   key={interval.id}
@@ -1369,13 +1332,12 @@ function App() {
     endTimeStr: string,
     title: string,
     type: "task" | "blocked",
-    eventId: string, // Use eventId consistently
-    onClick: () => void, // Ensure onClick is always passed
+    eventId: string,
+    onClick: () => void,
   ) => {
     const start = parseLocalISO(startTimeStr);
     const end = parseLocalISO(endTimeStr);
 
-    // Robust check for valid dates and positive duration
     if (!start || !end || end <= start) {
       console.warn(
         `Invalid date range for event: ${title} (ID: ${eventId}), Start: ${startTimeStr}, End: ${endTimeStr}. Skipping render.`,
@@ -1383,14 +1345,12 @@ function App() {
       return null;
     }
 
-    // Use the constant calendar grid settings
     const dayViewStartHour = GRID_START_HOUR;
     const dayViewEndHour = GRID_END_HOUR;
     const totalDayViewMinutes = (dayViewEndHour - dayViewStartHour) * 60;
 
-    if (totalDayViewMinutes <= 0) return null; // Avoid division by zero
+    if (totalDayViewMinutes <= 0) return null;
 
-    // Calculate start and end minutes relative to the view window (8am)
     const startMinutesOffset = Math.max(
       0,
       start.getHours() * 60 + start.getMinutes() - dayViewStartHour * 60,
@@ -1400,12 +1360,9 @@ function App() {
       end.getHours() * 60 + end.getMinutes() - dayViewStartHour * 60,
     );
 
-    // Calculate duration within the view window
     const durationMinutesInView = endMinutesOffset - startMinutesOffset;
 
-    // Only render if the event overlaps with the view window
     if (durationMinutesInView <= 0) {
-      // console.log(`Event ${title} (ID: ${eventId}) is outside the ${dayViewStartHour}-${dayViewEndHour} view window. Skipping render.`);
       return null;
     }
 
@@ -1422,27 +1379,26 @@ function App() {
 
     return (
       <div
-        key={`${type}-${eventId}`} // Use stable key
+        key={`${type}-${eventId}`}
         className={`absolute left-1 right-1 px-1.5 py-0.5 rounded ${bgColor} ${hoverColor} ${textColor} text-xs overflow-hidden shadow border cursor-pointer transition-colors duration-150 pointer-events-auto`}
         style={{
           top: `${topPercent}%`,
-          height: `${Math.max(heightPercent, 2)}%`, // Ensure minimum visible height
-          minHeight: "16px", // Ensure text is readable
-          zIndex: type === "task" ? 10 : 5, // Tasks on top
+          height: `${Math.max(heightPercent, 2)}%`,
+          minHeight: "16px",
+          zIndex: type === "task" ? 10 : 5,
         }}
         title={`${title}\n${format(start, "HH:mm")} - ${format(end, "HH:mm")}`}
         onClick={(e) => {
-          e.stopPropagation(); // Prevent potential parent clicks if nested
+          e.stopPropagation();
           onClick();
         }}
       >
-        {/* Only show times if height allows */}
         <div
           className={`font-semibold truncate ${heightPercent < 5 ? "leading-tight" : ""}`}
         >
           {title}
         </div>
-        {heightPercent >= 5 && ( // Show time only if enough space
+        {heightPercent >= 5 && (
           <div className="text-[10px] opacity-80 truncate leading-tight">
             {format(start, "HH:mm")} - {format(end, "HH:mm")}
           </div>
@@ -1452,7 +1408,6 @@ function App() {
   };
 
   const renderCalendar = () => {
-    // Uses 'days' and 'hours' from component scope (defined with useMemo)
     return (
       <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg overflow-hidden mt-6">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
@@ -1482,7 +1437,6 @@ function App() {
           </div>
         </div>
 
-        {/* Optimization Results Summary */}
         {isOptimized && optimizationResult.status && (
           <div
             className={`mb-4 p-3 rounded-lg text-sm border ${
@@ -1527,7 +1481,6 @@ function App() {
               )}
           </div>
         )}
-        {/* Separate Error Display for Optimization Errors */}
         {error &&
           optimizationResult.status &&
           ["Error", "Infeasible", "Not Solved"].includes(
@@ -1543,15 +1496,9 @@ function App() {
             </div>
           )}
 
-        {/* Calendar Grid */}
         <div className="overflow-x-auto relative">
-          {/* Use CSS Grid for layout */}
           <div className="grid grid-cols-[45px_repeat(7,minmax(110px,1fr))] min-w-[800px]">
-            {" "}
-            {/* Time labels + 7 days */}
-            {/* Top-left corner */}
             <div className="sticky top-0 z-30 bg-gray-800 h-14 border-b border-r border-gray-700"></div>
-            {/* Day Headers */}
             {days.map((day) => (
               <div
                 key={`header-${day.toISOString()}`}
@@ -1565,8 +1512,6 @@ function App() {
                 </div>
               </div>
             ))}
-            {/* Time Slots Area */}
-            {/* Time Labels Column */}
             <div className="col-start-1 row-start-2 row-span-auto">
               {hours.map((hour) => (
                 <div
@@ -1577,30 +1522,23 @@ function App() {
                 </div>
               ))}
             </div>
-            {/* Grid Cells & Event Rendering */}
             {days.map((day, dayIndex) => (
               <div
                 key={`day-col-${day.toISOString()}`}
-                className="col-start-[--col-start] row-start-2 row-span-auto relative border-r border-gray-700 bg-gray-850/30" // Slightly different bg for day columns
+                className="col-start-[--col-start] row-start-2 row-span-auto relative border-r border-gray-700 bg-gray-850/30"
                 style={{ "--col-start": dayIndex + 2 } as React.CSSProperties}
               >
-                {/* Background Hour Lines */}
                 {hours.map((_, hourIndex) => (
                   <div
                     key={`line-${dayIndex}-${hourIndex}`}
                     className="h-12 border-b border-gray-700/50"
                   ></div>
                 ))}
-
-                {/* Absolutely Positioned Events for this Day */}
                 <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 pointer-events-none">
-                  {" "}
-                  {/* Container for absolute events */}
-                  {/* Render Blocked Intervals */}
                   {blockedIntervals
                     .filter((interval) => {
                       const start = parseLocalISO(interval.startTime);
-                      return start && isSameDay(start, day); // Compare based on local day
+                      return start && isSameDay(start, day);
                     })
                     .map((interval) =>
                       renderCalendarEvent(
@@ -1612,7 +1550,6 @@ function App() {
                         () => handleEventClick(interval),
                       ),
                     )}
-                  {/* Render Optimized Tasks */}
                   {isOptimized &&
                     optimizedSchedule[format(day, "yyyy-MM-dd")]?.map(
                       (scheduled) =>
@@ -1638,7 +1575,7 @@ function App() {
   const renderEventDetailsModal = () => {
     if (!showEventDetailsModal || !selectedEvent) return null;
 
-    const isTask = "priority" in selectedEvent; // Check if it's a ScheduledTaskItem
+    const isTask = "priority" in selectedEvent;
     const title = isTask ? selectedEvent.name : selectedEvent.activity;
     const startTime = parseLocalISO(selectedEvent.startTime);
     const endTime = parseLocalISO(
@@ -1735,7 +1672,6 @@ function App() {
           </h1>
         </header>
 
-        {/* Global Error Display (for non-modal, non-optimization errors) */}
         {error &&
           !showNewBlockForm &&
           !showNewTaskForm &&
@@ -1771,16 +1707,20 @@ function App() {
         {mode && (
           <>
             {renderTimeWindow()}
-            {/* Grid for Tasks and Blocks on larger screens */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               {renderTasks()}
               {renderBlockedIntervals()}
             </div>
             {renderCalendar()}
+
+            {/* --- Add the Scheduled Tasks List Here --- */}
+            {isOptimized && Object.keys(optimizedSchedule).length > 0 && (
+              <ScheduledTasksList schedule={optimizedSchedule} />
+            )}
+            {/* ----------------------------------------- */}
           </>
         )}
 
-        {/* Render Modals */}
         {showNewTaskForm && renderNewTaskForm()}
         {showNewBlockForm && renderNewBlockForm()}
         {showEditTaskForm && renderEditTaskForm()}
