@@ -1,11 +1,16 @@
+# bc2411/allocation_logic.py
 import numpy as np
-# import pandas as pd # Pandas not actually used here, can be removed if desired
-from datetime import datetime, timedelta, timezone # Import timezone
+from datetime import datetime, timedelta, timezone
+import math
+import traceback # Keep for potential debugging in helpers
 from pulp import (
     LpProblem, LpMaximize, LpVariable, LpBinary, LpContinuous,
     lpSum, LpStatus, PULP_CBC_CMD # Import solver if needed explicitly
 )
-import math # Ensure math is imported
+# --- Import Gurobi ---
+import gurobipy as gp
+from gurobipy import GRB
+
 # ------------------------------------------------------------
 # CONFIG: 7 days, each day has 56 slots => 392 total slots
 # Each slot = 15 minutes from 08:00 to 22:00 (exclusive end) LOCAL TIME
@@ -20,12 +25,17 @@ _day0_naive_local = None
 def get_day0():
     global _day0_naive_local
     if _day0_naive_local is None:
-        _day0_naive_local = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
+        # Ensure it gets initialized only once, even if called multiple times before 8am
+        now = datetime.now()
+        start_of_today = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        # If current time is before 8am today, day0 should be 8am today.
+        # If current time is after 8am today, day0 should still be 8am today.
+        _day0_naive_local = start_of_today
         print(f"Initialized DAY0 (naive local): {_day0_naive_local}")
     return _day0_naive_local
 
 # ------------------------------------------------------------
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (Unchanged from original)
 # ------------------------------------------------------------
 
 def slot_to_datetime(slot):
@@ -35,6 +45,9 @@ def slot_to_datetime(slot):
     """
     day0 = get_day0()
     if not (0 <= slot < TOTAL_SLOTS):
+        # Allow slight flexibility for end time calculation (slot = TOTAL_SLOTS)
+        if slot == TOTAL_SLOTS:
+            return day0 + timedelta(days=TOTAL_DAYS)
         raise ValueError(f"Slot index {slot} is out of valid range [0, {TOTAL_SLOTS-1}]")
 
     day_index = slot // SLOTS_PER_DAY
@@ -45,7 +58,6 @@ def slot_to_datetime(slot):
 
     # Calculate the target datetime by adding days and minutes to day0
     target_datetime = day0 + timedelta(days=day_index, minutes=total_minutes_from_8am)
-    # print(f"slot_to_datetime({slot}) -> day={day_index}, slot_in_day={slot_in_day}, mins_from_8am={total_minutes_from_8am} -> {target_datetime}")
     return target_datetime # Returns naive local datetime
 
 def datetime_to_slot(dt):
@@ -56,86 +68,340 @@ def datetime_to_slot(dt):
     day0 = get_day0()
 
     # --- 1. Clamp to 7-day Horizon ---
-    horizon_end = day0 + timedelta(days=TOTAL_DAYS)
+    horizon_end = day0 + timedelta(days=TOTAL_DAYS) # This is effectively 8am on day 7
+    # The last valid *start* time is the beginning of the last slot
+    last_slot_start_dt = slot_to_datetime(TOTAL_SLOTS - 1)
+
     if dt < day0:
         dt_clamped = day0
-        # print(f"datetime_to_slot: Clamped {dt} to start of horizon {day0}")
     elif dt >= horizon_end:
-         # Clamp to the *start* of the last possible slot
-        dt_clamped = slot_to_datetime(TOTAL_SLOTS - 1)
-        # print(f"datetime_to_slot: Clamped {dt} to end of horizon {dt_clamped}")
+        # If dt is exactly or after the end horizon (8am day 7), map it to the last slot index
+        dt_clamped = last_slot_start_dt
     else:
         dt_clamped = dt
 
     # --- 2. Calculate Day Index and Time within Day ---
     time_since_day0 = dt_clamped - day0
-    # Use total_seconds for precision with timedelta
     total_minutes_from_day0_start = time_since_day0.total_seconds() / 60.0
 
-    # Determine the day index relative to day0
     day_index = int(total_minutes_from_day0_start // (24 * 60))
-    # Ensure day_index is valid (0 to 6) due to clamping above
     day_index = max(0, min(day_index, TOTAL_DAYS - 1))
 
-    # Calculate the minute of the day (0 to 1439) for the clamped datetime
-    # This requires getting the time component of dt_clamped
     hour = dt_clamped.hour
     minute = dt_clamped.minute
-    minutes_into_day = hour * 60 + minute # Minutes from midnight of that specific day
+    minutes_into_day = hour * 60 + minute
 
     # --- 3. Map to 8am-10pm Window (slots 0-55 within the day) ---
     start_minute_of_window = 8 * 60  # 480
-    end_minute_of_window = 22 * 60 # 1320 (Window is [8:00, 22:00) )
+    end_minute_of_window = 22 * 60 # 1320
 
     if minutes_into_day < start_minute_of_window:
-        # Time is before 8am on this day -> maps to slot 0 of this day
         slot_in_day = 0
-        # print(f"  Time {hour:02d}:{minute:02d} is before 8am, mapping to slot_in_day 0")
     elif minutes_into_day >= end_minute_of_window:
-        # Time is 10pm or later on this day -> maps to the last slot (55) of this day
+        # Map times from 22:00 onwards to the last slot of the day (index 55)
         slot_in_day = SLOTS_PER_DAY - 1
-        # print(f"  Time {hour:02d}:{minute:02d} is 10pm or later, mapping to slot_in_day {slot_in_day}")
     else:
-        # Time is within the 8am to 10pm window
         minutes_from_8am = minutes_into_day - start_minute_of_window
-        slot_in_day = int(minutes_from_8am // 15) # floor division
-        # print(f"  Time {hour:02d}:{minute:02d} is within window, {minutes_from_8am} min from 8am, mapping to slot_in_day {slot_in_day}")
+        slot_in_day = int(minutes_from_8am // 15)
 
-    # Ensure slot_in_day is valid (0 to 55)
     slot_in_day = max(0, min(slot_in_day, SLOTS_PER_DAY - 1))
 
     # --- 4. Calculate Global Slot ---
     global_slot = day_index * SLOTS_PER_DAY + slot_in_day
-    # print(f"datetime_to_slot({dt}) -> clamped={dt_clamped}, day={day_index}, slot_in_day={slot_in_day} -> global_slot={global_slot}")
 
-    # Final safety clamp (shouldn't be needed if logic is correct)
     return max(0, min(global_slot, TOTAL_SLOTS - 1))
 
 
-# Build sets of valid slots for "morning", "afternoon", "evening"
+# Build sets of valid slots for "morning", "afternoon", "evening" (Unchanged)
 morning_slots = []
 afternoon_slots = []
 evening_slots = []
 for day in range(TOTAL_DAYS):
     base = day * SLOTS_PER_DAY
-    # morning => 08:00..<12:00 => slots 0..15 for that day (16 slots)
-    morning_slots.extend(range(base, base + 16))
-    # afternoon => 12:00..<16:00 => slots 16..31 (16 slots)
-    afternoon_slots.extend(range(base + 16, base + 32))
-    # evening => 16:00..<22:00 => slots 32..55 (24 slots)
-    evening_slots.extend(range(base + 32, base + SLOTS_PER_DAY)) # up to 56 exclusive
+    morning_slots.extend(range(base, base + 16)) # 8am..<12pm
+    afternoon_slots.extend(range(base + 16, base + 32)) # 12pm..<4pm
+    evening_slots.extend(range(base + 32, base + SLOTS_PER_DAY)) # 4pm..<10pm
 
 PREFERENCE_MAP = {
-    "any": set(range(TOTAL_SLOTS)), # Allow any slot if preference is 'any'
+    "any": set(range(TOTAL_SLOTS)),
     "morning": set(morning_slots),
     "afternoon": set(afternoon_slots),
     "evening": set(evening_slots)
 }
 
 # ------------------------------------------------------------
-# MAIN SCHEDULER FUNCTION
+# GUROBI SCHEDULER FUNCTION
 # ------------------------------------------------------------
 
+def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None, time_limit_sec=30):
+    """
+    Solves the scheduling problem using Gurobi.
+
+    Args:
+        tasks (list): List of task dictionaries.
+        commitments (dict): Dictionary mapping blocked GLOBAL slots to 15.
+        alpha (float): Weight for maximizing leisure time.
+        beta (float): Weight for minimizing stress.
+        daily_limit_slots (int, optional): Maximum task slots per day.
+        time_limit_sec (int): Solver time limit in seconds.
+
+    Returns:
+        dict: Optimization status and results (same format as PuLP version).
+    """
+
+    print(f"Gurobi Solver received {len(tasks)} tasks.")
+    print(f"Gurobi Solver received {len(commitments)} commitment slots.")
+    print(f"Gurobi Solver params: Alpha={alpha}, Beta={beta}, DailyLimitSlots={daily_limit_slots}, TimeLimit={time_limit_sec}s")
+
+    n_tasks = len(tasks)
+    if n_tasks == 0:
+        print("Gurobi Solver: No tasks to schedule.")
+        total_possible_minutes = TOTAL_SLOTS * 15
+        committed_minutes = len(commitments) * 15
+        initial_leisure = total_possible_minutes - committed_minutes
+        return {'status': 'Optimal', 'schedule': [], 'total_leisure': initial_leisure, 'total_stress': 0.0, 'message': 'No tasks provided.'}
+
+    # --- Create Gurobi Model ---
+    try:
+        with gp.Env(empty=True) as env:
+            # env.setParam('OutputFlag', 0) # Suppress Gurobi console output (optional)
+            env.start()
+            with gp.Model("Weekly_Scheduler", env=env) as m:
+                m.setParam('OutputFlag', 0) # Suppress console output for this model
+                m.setParam(GRB.Param.TimeLimit, time_limit_sec) # Set time limit
+
+                # --- Decision variables ---
+                # X[i, s] = 1 if task i starts at slot s, 0 otherwise
+                X = m.addVars(n_tasks, TOTAL_SLOTS, vtype=GRB.BINARY, name="X")
+
+                # Y[s] = 1 if slot s is occupied by *any* task, 0 otherwise
+                Y = m.addVars(TOTAL_SLOTS, vtype=GRB.BINARY, name="Y")
+
+                # L_var[s] = amount of leisure time (in minutes) in slot s
+                L_var = m.addVars(TOTAL_SLOTS, vtype=GRB.CONTINUOUS, lb=0, ub=15, name="L")
+
+                # --- Objective Function ---
+                # Maximize leisure, minimize stress
+                obj_leisure = alpha * gp.quicksum(L_var[s] for s in range(TOTAL_SLOTS))
+                obj_stress = beta * gp.quicksum(X[i, s] * (tasks[i]["priority"] * tasks[i]["difficulty"])
+                                               for i in range(n_tasks) for s in range(TOTAL_SLOTS))
+                m.setObjective(obj_leisure - obj_stress, GRB.MAXIMIZE)
+
+                # --- Constraints ---
+                # (a) Each task assigned exactly one starting slot
+                m.addConstrs((X.sum(i, '*') == 1 for i in range(n_tasks)), name="Assign")
+
+                # (b) Deadlines & Horizon: Task must finish by deadline and fit within horizon
+                for i in range(n_tasks):
+                    dur = tasks[i]["duration_slots"]
+                    dl = tasks[i]["deadline_slot"]
+                    task_key = tasks[i].get('id', i)
+                    for s in range(TOTAL_SLOTS):
+                        # Deadline check: last slot (s+dur-1) must be <= dl
+                        if s + dur - 1 > dl:
+                            m.addConstr(X[i, s] == 0, name=f"Deadline_{task_key}_s{s}")
+                        # Horizon check: last slot (s+dur-1) must be < TOTAL_SLOTS
+                        if s + dur > TOTAL_SLOTS:
+                            m.addConstr(X[i, s] == 0, name=f"HorizonEnd_{task_key}_s{s}")
+
+                # (c) No Overlap: At most one task can *occupy* any given slot t
+                for t in range(TOTAL_SLOTS):
+                    occupying_tasks_vars = []
+                    for i in range(n_tasks):
+                        dur = tasks[i]["duration_slots"]
+                        # Task i occupies slot t if it starts in s such that: s <= t < s + dur
+                        # Valid start slots 's' are from max(0, t - dur + 1) to t
+                        for s in range(max(0, t - dur + 1), t + 1):
+                             # Ensure this start slot is possible given task duration and horizon
+                             if s + dur <= TOTAL_SLOTS:
+                                 occupying_tasks_vars.append(X[i, s])
+
+                    if occupying_tasks_vars:
+                         m.addConstr(gp.quicksum(occupying_tasks_vars) <= 1, name=f"NoOverlap_s{t}")
+
+                # (d) Preferences: Task i can only start in a slot matching its preference
+                for i in range(n_tasks):
+                    pref = tasks[i].get("preference", "any")
+                    task_key = tasks[i].get('id', i)
+                    if pref not in PREFERENCE_MAP:
+                        print(f"Warning: Invalid preference '{pref}' for task {task_key}. Defaulting to 'any'.")
+                        pref = "any"
+                    allowed_slots = PREFERENCE_MAP.get(pref, PREFERENCE_MAP["any"])
+
+                    for s in range(TOTAL_SLOTS):
+                        if s not in allowed_slots:
+                            m.addConstr(X[i, s] == 0, name=f"PrefWin_{task_key}_s{s}")
+
+                # (e) Commitments: No task can start if it would overlap with a committed slot
+                committed_slots = set(commitments.keys())
+                for i in range(n_tasks):
+                    dur = tasks[i]["duration_slots"]
+                    task_key = tasks[i].get('id', i)
+                    for s in range(TOTAL_SLOTS):
+                        # Slots task *would* occupy: s to s+dur-1
+                        task_occupies = set(range(s, min(s + dur, TOTAL_SLOTS)))
+                        if task_occupies.intersection(committed_slots):
+                            m.addConstr(X[i, s] == 0, name=f"CommitOverlap_{task_key}_s{s}")
+
+
+                # (f) Leisure Calculation: Link L_var with Y (task occupation) and commitments
+                for s in range(TOTAL_SLOTS):
+                    # Determine variables for tasks occupying slot 's'
+                    occupying_task_vars_sum = gp.LinExpr() # Initialize empty linear expression
+                    for i in range(n_tasks):
+                        dur = tasks[i]["duration_slots"]
+                        # Task i occupies slot s if it starts in range [s - dur + 1, s]
+                        for start_slot in range(max(0, s - dur + 1), s + 1):
+                            if start_slot + dur <= TOTAL_SLOTS: # Ensure task fits
+                                occupying_task_vars_sum.add(X[i, start_slot])
+
+                    # Y[s] = 1 if occupied by a task, 0 otherwise.
+                    # Since NoOverlap ensures sum <= 1, Y[s] == sum works.
+                    m.addConstr(Y[s] == occupying_task_vars_sum, name=f"Link_Y_Exact_{s}")
+
+                    # Calculate leisure based on commitment and task occupation (Y)
+                    is_committed = 1 if s in commitments else 0
+                    if is_committed:
+                        m.addConstr(L_var[s] == 0, name=f"NoLeisure_Committed_{s}")
+                    else: # Slot is not committed
+                        # L_var[s] <= 15 * (1 - Y[s])
+                        # If Y[s]=1 (task occupied), L_var[s]<=0. Since lb=0, L_var=0.
+                        # If Y[s]=0 (no task), L_var[s]<=15. Objective will push it to 15.
+                        m.addConstr(L_var[s] <= 15 * (1 - Y[s]), name=f"LeisureBound_NotCommitted_{s}")
+
+
+                # (g) Daily Limits (Optional)
+                if daily_limit_slots is not None and daily_limit_slots >= 0:
+                    print(f"Applying daily limit of {daily_limit_slots} slots ({daily_limit_slots * 15} minutes)")
+                    for d in range(TOTAL_DAYS):
+                        day_start_slot = d * SLOTS_PER_DAY
+                        day_end_slot = day_start_slot + SLOTS_PER_DAY
+                        # Sum Y[s] for the day
+                        daily_task_slots_sum = gp.quicksum(Y[s] for s in range(day_start_slot, day_end_slot))
+                        m.addConstr(daily_task_slots_sum <= daily_limit_slots, name=f"DailyLimit_Day_{d}")
+                        print(f"  Constraint Day {d}: sum(Y[{day_start_slot}...{day_end_slot-1}]) <= {daily_limit_slots}")
+
+                # --- Solve ---
+                print("Gurobi Solver: Solving the model...")
+                m.optimize()
+                solve_time = m.Runtime
+
+                # --- Process Results ---
+                status = m.Status
+                status_map = {
+                    GRB.OPTIMAL: "Optimal",
+                    GRB.INFEASIBLE: "Infeasible",
+                    GRB.UNBOUNDED: "Unbounded",
+                    GRB.INF_OR_UNBD: "Infeasible or Unbounded",
+                    GRB.TIME_LIMIT: "Time Limit Reached",
+                    GRB.SUBOPTIMAL: "Suboptimal", # Solution available but not proven optimal
+                    # Add other statuses as needed
+                }
+                gurobi_status_str = status_map.get(status, f"Gurobi Status Code {status}")
+                print(f"Gurobi Solver status: {gurobi_status_str} (solved in {solve_time:.2f}s)")
+
+                # Check if a solution exists (Optimal, Suboptimal, Time Limit might have one)
+                if status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT]:
+                    if m.SolCount > 0: # Check if a feasible solution is actually available
+                        print("Gurobi Solver: Solution found!")
+                        schedule_records = []
+                        solution_threshold = 0.5 # Standard threshold for binary vars
+
+                        for i in range(n_tasks):
+                            task_scheduled = False
+                            for s in range(TOTAL_SLOTS):
+                                try:
+                                    if X[i, s].X > solution_threshold:
+                                        start_slot = s
+                                        dur_slots = tasks[i]["duration_slots"]
+                                        end_slot = s + dur_slots - 1 # Last slot index occupied
+
+                                        # Double-check bounds (should be handled by constraints)
+                                        if end_slot >= TOTAL_SLOTS:
+                                             print(f"Warning: Task {tasks[i]['id']} starts at {s} but end_slot {end_slot} calculated exceeds limit {TOTAL_SLOTS-1}. Skipping.")
+                                             continue
+
+                                        start_dt = slot_to_datetime(start_slot) # Naive local
+                                        # End time is the start time of the slot *after* the last occupied slot
+                                        end_dt = slot_to_datetime(end_slot + 1) # Naive local
+
+                                        record = {
+                                            "id": tasks[i].get('id', f"task-result-{i}"),
+                                            "name": tasks[i]["name"],
+                                            "priority": tasks[i]["priority"],
+                                            "difficulty": tasks[i]["difficulty"],
+                                            "start_slot": start_slot,
+                                            "end_slot": end_slot,
+                                            "startTime": start_dt.isoformat(), # Naive local ISO string
+                                            "endTime": end_dt.isoformat(),   # Naive local ISO string
+                                            "duration_min": dur_slots * 15,
+                                            "preference": tasks[i].get("preference", "any")
+                                        }
+                                        schedule_records.append(record)
+                                        task_scheduled = True
+                                        break # Move to next task
+                                except (AttributeError, gp.GurobiError):
+                                    # Handle cases where .X might not be accessible (e.g., error before solution)
+                                    print(f"Error accessing solution value for X[{i},{s}].")
+                                    continue
+
+                            if not task_scheduled and status == GRB.OPTIMAL:
+                                 print(f"ERROR: Task {i} ('{tasks[i]['name']}') appears unscheduled despite Optimal status! Check Gurobi output/model.")
+                                 # This indicates a potential issue in model or solver result interpretation
+
+
+                        schedule_records.sort(key=lambda x: x["start_slot"])
+
+                        # Calculate total leisure from L_var values
+                        total_leisure_val = gp.quicksum(L_var[s].X for s in range(TOTAL_SLOTS)).getValue()
+
+                        # Recalculate stress (as Gurobi obj includes alpha/beta weights)
+                        calculated_stress = gp.quicksum(X[i, s].X * (tasks[i]["priority"] * tasks[i]["difficulty"])
+                                                         for i in range(n_tasks) for s in range(TOTAL_SLOTS)
+                                                         if X[i,s].X > solution_threshold).getValue()
+
+
+                        print(f"Gurobi Solver: Calculated Total Leisure = {total_leisure_val:.1f} minutes")
+                        print(f"Gurobi Solver: Calculated Total Stress Score = {calculated_stress:.1f}")
+
+                        final_status = gurobi_status_str
+                        # If status is Optimal but constraint (a) seems violated (task unscheduled)
+                        if status == GRB.OPTIMAL and not all(any(X[i, s].X > solution_threshold for s in range(TOTAL_SLOTS)) for i in range(n_tasks)):
+                             print("WARNING: Optimal status reported but not all tasks seem scheduled based on variable values > 0.5. Reporting as Suboptimal.")
+                             final_status = "Suboptimal" # Adjust status string
+
+                        return {
+                            "status": final_status, # Report Gurobi status string
+                            "schedule": schedule_records,
+                            "total_leisure": round(total_leisure_val, 1),
+                            "total_stress": round(calculated_stress, 1),
+                            "solve_time_seconds": round(solve_time, 2)
+                        }
+                    else: # Status indicated solution possible, but SolCount is 0
+                        print(f"Gurobi Solver: Status is {gurobi_status_str} but no solution found (SolCount=0).")
+                        message = f"Solver finished with status {gurobi_status_str} but reported no feasible solution. This might happen if the time limit was reached before finding a feasible point."
+                        if status == GRB.TIME_LIMIT:
+                             message = "Time limit reached before a feasible solution could be found."
+                        return {"status": gurobi_status_str, "schedule": [], "message": message}
+
+                elif status == GRB.INFEASIBLE:
+                    print("Gurobi Solver: Model is infeasible.")
+                    # You can compute an Irreducible Inconsistent Subsystem (IIS) to help debug:
+                    # m.computeIIS()
+                    # m.write("infeasible_model.ilp")
+                    # print("Wrote IIS to infeasible_model.ilp for debugging.")
+                    return {"status": "Infeasible", "schedule": [], "message": "Could not find a feasible schedule. Check constraints: deadlines too tight? Too many commitments or tasks for available time? Daily limits too strict?"}
+                else: # Handle other Gurobi statuses
+                    print(f"Gurobi Solver finished with unhandled status: {gurobi_status_str}")
+                    return {"status": gurobi_status_str, "schedule": [], "message": f"Solver finished with status: {gurobi_status_str}."}
+
+    except gp.GurobiError as e:
+        print(f"Gurobi Error code {e.errno}: {e}")
+        return {"status": "Error", "message": f"Gurobi Error: {e}"}
+    except Exception as e:
+        print(f"An unexpected error occurred during Gurobi optimization: {e}")
+        print(traceback.format_exc())
+        return {"status": "Error", "message": f"Unexpected error during optimization: {e}"}
 def solve_schedule_pulp(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None):
     """
     Solves the scheduling problem using PuLP.
