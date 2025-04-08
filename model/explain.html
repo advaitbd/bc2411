@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Scheduler Logic Visualization</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                line-height: 1.6;
+                margin: 20px;
+            }
+            h1,
+            h2,
+            h3 {
+                border-bottom: 1px solid #ccc;
+                padding-bottom: 5px;
+            }
+            table {
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                width: 100%; /* Make table responsive */
+                table-layout: fixed; /* Prevent content from stretching columns */
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 4px; /* Reduced padding */
+                text-align: center;
+                font-size: 10px; /* Smaller font for slots */
+                word-wrap: break-word; /* Wrap long text */
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .slot {
+                min-width: 30px; /* Ensure minimum width */
+                height: 30px;
+                position: relative; /* For potential overlay text */
+                background-color: #e6ffe6; /* Default: Available */
+                vertical-align: top; /* Align text to top */
+            }
+            .slot-index {
+                font-weight: bold;
+                color: #555;
+                display: block; /* Put index on its own line */
+                margin-bottom: 2px;
+            }
+            .slot-time {
+                font-size: 9px;
+                color: #777;
+                display: block;
+            }
+
+            /* --- Constraint Visualization Styles --- */
+            .committed {
+                background-color: #666; /* Dark grey */
+                color: white;
+            }
+            .task-occupied {
+                background-color: #add8e6; /* Light blue */
+            }
+            .disallowed-deadline {
+                background-color: #ffcccc; /* Light red */
+            }
+            .disallowed-preference {
+                background-color: #e0e0e0; /* Light grey */
+            }
+            .disallowed-commitment-start {
+                background-color: #ffd699; /* Light orange */
+            }
+            .disallowed-overlap-start {
+                background-color: #f0b3ff; /* Light purple */
+            }
+            .leisure-yes {
+                background-color: #aaffaa; /* Bright green */
+            }
+            .leisure-no {
+                background-color: #ffaaaa; /* Bright red */
+            }
+
+            .legend {
+                margin-bottom: 20px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                background-color: #f9f9f9;
+            }
+            .legend span {
+                display: inline-block;
+                width: 15px;
+                height: 15px;
+                margin-right: 5px;
+                vertical-align: middle;
+                border: 1px solid #555;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Scheduler Logic Visualization</h1>
+
+        <p>
+            This page illustrates the time slot system and how constraints
+            affect task placement in the optimization model. We focus on
+            <strong>Day 0 (Today, 8am - 10pm)</strong> which corresponds to
+            global slots <strong>0 to 55</strong>.
+        </p>
+
+        <div class="legend">
+            <strong>General Legend:</strong><br />
+            <span style="background-color: #e6ffe6"></span> Available Slot
+            &nbsp; <span style="background-color: #666"></span> Committed Slot
+            &nbsp; <span style="background-color: #add8e6"></span> Task Occupied
+            Slot &nbsp;
+            <span style="background-color: #ffcccc"></span> Disallowed by
+            Deadline/Horizon &nbsp;
+            <span style="background-color: #e0e0e0"></span> Disallowed by
+            Preference &nbsp;
+            <span style="background-color: #ffd699"></span> Start Slot
+            Invalidated by Commitment &nbsp;
+            <span style="background-color: #f0b3ff"></span> Start Slot
+            Invalidated by Overlap &nbsp;
+            <span style="background-color: #aaffaa"></span> Has Leisure (15 min)
+            &nbsp; <span style="background-color: #ffaaaa"></span> No Leisure (0
+            min) &nbsp;
+        </div>
+
+        <h2>Basic Time Slot Grid (Day 0: Slots 0-55)</h2>
+        <p>
+            Each cell represents a 15-minute slot. The top number is the global
+            slot index, the bottom is the start time.
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="8">Day 0</th>
+                </tr>
+                <tr>
+                    <th>8:00 - 9:45</th>
+                    <th>10:00 - 11:45</th>
+                    <th>12:00 - 1:45</th>
+                    <th>2:00 - 3:45</th>
+                    <th>4:00 - 5:45</th>
+                    <th>6:00 - 7:45</th>
+                    <th>8:00 - 9:45</th>
+                    <th>(Remaining slots...)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Simplified view - showing blocks of 8 slots per column header -->
+                <tr>
+                    <!-- 8:00 - 9:45 (Slots 0-7) -->
+                    <td class="slot" id="vis-base-0">
+                        <span class="slot-index">0</span
+                        ><span class="slot-time">08:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-1">
+                        <span class="slot-index">1</span
+                        ><span class="slot-time">08:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-2">
+                        <span class="slot-index">2</span
+                        ><span class="slot-time">08:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-3">
+                        <span class="slot-index">3</span
+                        ><span class="slot-time">08:45</span>
+                    </td>
+                    <td class="slot" id="vis-base-4">
+                        <span class="slot-index">4</span
+                        ><span class="slot-time">09:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-5">
+                        <span class="slot-index">5</span
+                        ><span class="slot-time">09:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-6">
+                        <span class="slot-index">6</span
+                        ><span class="slot-time">09:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-7">
+                        <span class="slot-index">7</span
+                        ><span class="slot-time">09:45</span>
+                    </td>
+                </tr>
+                <tr>
+                    <!-- 10:00 - 11:45 (Slots 8-15) -->
+                    <td class="slot" id="vis-base-8">
+                        <span class="slot-index">8</span
+                        ><span class="slot-time">10:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-9">
+                        <span class="slot-index">9</span
+                        ><span class="slot-time">10:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-10">
+                        <span class="slot-index">10</span
+                        ><span class="slot-time">10:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-11">
+                        <span class="slot-index">11</span
+                        ><span class="slot-time">10:45</span>
+                    </td>
+                    <td class="slot" id="vis-base-12">
+                        <span class="slot-index">12</span
+                        ><span class="slot-time">11:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-13">
+                        <span class="slot-index">13</span
+                        ><span class="slot-time">11:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-14">
+                        <span class="slot-index">14</span
+                        ><span class="slot-time">11:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-15">
+                        <span class="slot-index">15</span
+                        ><span class="slot-time">11:45</span>
+                    </td>
+                </tr>
+                <tr>
+                    <!-- 12:00 - 1:45 (Slots 16-23) -->
+                    <td class="slot" id="vis-base-16">
+                        <span class="slot-index">16</span
+                        ><span class="slot-time">12:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-17">
+                        <span class="slot-index">17</span
+                        ><span class="slot-time">12:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-18">
+                        <span class="slot-index">18</span
+                        ><span class="slot-time">12:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-19">
+                        <span class="slot-index">19</span
+                        ><span class="slot-time">12:45</span>
+                    </td>
+                    <td class="slot" id="vis-base-20">
+                        <span class="slot-index">20</span
+                        ><span class="slot-time">13:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-21">
+                        <span class="slot-index">21</span
+                        ><span class="slot-time">13:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-22">
+                        <span class="slot-index">22</span
+                        ><span class="slot-time">13:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-23">
+                        <span class="slot-index">23</span
+                        ><span class="slot-time">13:45</span>
+                    </td>
+                </tr>
+                <!-- Add more rows as needed to show relevant slots for examples -->
+                <tr>
+                    <!-- 14:00 - 15:45 (Slots 24-31) -->
+                    <td class="slot" id="vis-base-24">
+                        <span class="slot-index">24</span
+                        ><span class="slot-time">14:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-25">
+                        <span class="slot-index">25</span
+                        ><span class="slot-time">14:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-26">
+                        <span class="slot-index">26</span
+                        ><span class="slot-time">14:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-27">
+                        <span class="slot-index">27</span
+                        ><span class="slot-time">14:45</span>
+                    </td>
+                    <td class="slot" id="vis-base-28">
+                        <span class="slot-index">28</span
+                        ><span class="slot-time">15:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-29">
+                        <span class="slot-index">29</span
+                        ><span class="slot-time">15:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-30">
+                        <span class="slot-index">30</span
+                        ><span class="slot-time">15:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-31">
+                        <span class="slot-index">31</span
+                        ><span class="slot-time">15:45</span>
+                    </td>
+                </tr>
+                <!-- Example showing last few slots of the day -->
+                <tr>
+                    <!-- ... rows omitted ... -->
+                    <td class="slot" id="vis-base-48">...</td>
+                    <td class="slot" id="vis-base-49">...</td>
+                    <td class="slot" id="vis-base-50">
+                        <span class="slot-index">50</span
+                        ><span class="slot-time">20:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-51">
+                        <span class="slot-index">51</span
+                        ><span class="slot-time">20:45</span>
+                    </td>
+                    <td class="slot" id="vis-base-52">
+                        <span class="slot-index">52</span
+                        ><span class="slot-time">21:00</span>
+                    </td>
+                    <td class="slot" id="vis-base-53">
+                        <span class="slot-index">53</span
+                        ><span class="slot-time">21:15</span>
+                    </td>
+                    <td class="slot" id="vis-base-54">
+                        <span class="slot-index">54</span
+                        ><span class="slot-time">21:30</span>
+                    </td>
+                    <td class="slot" id="vis-base-55">
+                        <span class="slot-index">55</span
+                        ><span class="slot-time">21:45</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Constraint Examples</h2>
+
+        <!-- Constraint (a): Task Assignment -->
+        <h3>(a) Task Assignment</h3>
+        <p>
+            <strong>Intuition:</strong> Every task must be scheduled exactly
+            once.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum(X[i, s] for s in all_slots) = 1</code> for each task
+            <code>i</code>.
+        </p>
+        <p>
+            <strong>Visualization:</strong> This constraint doesn't directly
+            color the grid *before* solving. It ensures that the final solution
+            (like the 'Task Occupied' slots shown below) assigns a single start
+            time (one <code>X[i,s]=1</code>) for every task.
+        </p>
+
+        <!-- Constraint (b): Deadlines & Horizon -->
+        <h3>(b) Deadlines & Horizon</h3>
+        <p>
+            <strong>Intuition:</strong> Tasks must finish by their deadline and
+            fit within the 7-day window.
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> if starting task
+            <code>i</code> (duration <code>dur_i</code>) at slot
+            <code>s</code> means its last slot (<code>s + dur_i - 1</code>) is
+            after its deadline slot (<code>dl_i</code>), OR if
+            <code>s + dur_i</code> exceeds <code>TOTAL_SLOTS</code> (392).
+        </p>
+        <p>
+            <strong>Example:</strong> Task A (duration 4 slots, deadline slot
+            <code>dl_A = 6</code>). Where can it NOT start?
+        </p>
+        <ul>
+            <li>
+                Start at <code>s=3</code>: Occupies 3, 4, 5, 6. Last slot is 6.
+                OK (<code>6 <= 6</code>).
+            </li>
+            <li>
+                Start at <code>s=4</code>: Occupies 4, 5, 6, 7. Last slot is 7.
+                VIOLATES deadline (<code>7 > 6</code>).
+                <code>X[A, 4]</code> must be 0.
+            </li>
+            <li>
+                Start at <code>s=5</code>: Occupies 5, 6, 7, 8. Last slot is 8.
+                VIOLATES deadline (<code>8 > 6</code>).
+                <code>X[A, 5]</code> must be 0.
+            </li>
+            <li>
+                Start at <code>s=6</code>: Occupies 6, 7, 8, 9. Last slot is 9.
+                VIOLATES deadline (<code>9 > 6</code>).
+                <code>X[A, 6]</code> must be 0.
+            </li>
+            <li>...and so on.</li>
+        </ul>
+        <p><strong>Visualization (Slots near deadline 6):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot">
+                        <span class="slot-index">3</span
+                        ><span class="slot-time">08:45</span>
+                    </td>
+                    <td
+                        class="slot disallowed-deadline"
+                        title="Start=4 fails deadline (last=7 > dl=6)"
+                    >
+                        <span class="slot-index">4</span
+                        ><span class="slot-time">09:00</span>
+                    </td>
+                    <td
+                        class="slot disallowed-deadline"
+                        title="Start=5 fails deadline (last=8 > dl=6)"
+                    >
+                        <span class="slot-index">5</span
+                        ><span class="slot-time">09:15</span>
+                    </td>
+                    <td
+                        class="slot disallowed-deadline"
+                        title="Start=6 fails deadline (last=9 > dl=6)"
+                    >
+                        <span class="slot-index">6</span
+                        ><span class="slot-time">09:30</span>
+                    </td>
+                    <td
+                        class="slot disallowed-deadline"
+                        title="Start=7 fails deadline (last=10 > dl=6)"
+                    >
+                        <span class="slot-index">7</span
+                        ><span class="slot-time">09:45</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="legend">
+            <span style="background-color: #ffcccc"></span> Potential START slot
+            disallowed by deadline.
+        </div>
+
+        <!-- Constraint (c): No Overlap -->
+        <h3>(c) No Overlap</h3>
+        <p>
+            <strong>Intuition:</strong> Only one task can be active in any given
+            slot.
+        </p>
+        <p>
+            <strong>Model:</strong> For any slot <code>t</code>, the sum of
+            <code>X[i, s]</code> for all tasks <code>i</code> that would be
+            *active* during slot <code>t</code> (i.e., started at an
+            <code>s</code> such that <code>s <= t < s + dur_i</code>) must be <=
+            1.
+        </p>
+        <p>
+            <strong>Example:</strong> Task B (duration 3 slots) is scheduled to
+            start at <code>s=5</code> (occupies 5, 6, 7). Can Task C (duration 2
+            slots) start at <code>s=6</code>?
+        </p>
+        <ul>
+            <li>Task B occupies slots 5, 6, 7.</li>
+            <li>
+                Task C starting at <code>s=6</code> would occupy slots 6, 7.
+            </li>
+            <li>This creates an overlap in slots 6 and 7.</li>
+            <li>
+                The constraint prevents this. If <code>X[B, 5] = 1</code>, then
+                <code>X[C, 6]</code> must be 0.
+            </li>
+        </ul>
+        <p><strong>Visualization (If Task B starts at 5):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot">
+                        <span class="slot-index">4</span
+                        ><span class="slot-time">09:00</span>
+                    </td>
+                    <td class="slot task-occupied" title="Task B occupies">
+                        <span class="slot-index">5</span
+                        ><span class="slot-time">09:15</span>
+                    </td>
+                    <td
+                        class="slot task-occupied disallowed-overlap-start"
+                        title="Task B occupies. Task C cannot start here."
+                    >
+                        <span class="slot-index">6</span
+                        ><span class="slot-time">09:30</span>
+                    </td>
+                    <td
+                        class="slot task-occupied disallowed-overlap-start"
+                        title="Task B occupies. Task C starting at 7 would also overlap."
+                    >
+                        <span class="slot-index">7</span
+                        ><span class="slot-time">09:45</span>
+                    </td>
+                    <td class="slot">
+                        <span class="slot-index">8</span
+                        ><span class="slot-time">10:00</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="legend">
+            <span style="background-color: #add8e6"></span> Slot occupied by
+            Task B. &nbsp; <span style="background-color: #f0b3ff"></span> Task
+            C cannot START here because it would overlap with Task B.
+        </div>
+
+        <!-- Constraint (d): Preferences -->
+        <h3>(d) Preferences</h3>
+        <p>
+            <strong>Intuition:</strong> Tasks should start only within their
+            preferred time windows (morning, afternoon, evening, or any).
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> if slot
+            <code>s</code> is not in the `AllowedSlots_i` set for task
+            <code>i</code>'s preference.
+        </p>
+        <p>
+            <strong>Example:</strong> Task D has preference "morning" (slots
+            0-15 on any day). Can it start at slot <code>s=18</code> (12:30 PM)?
+        </p>
+        <ul>
+            <li>Slot 18 is in the afternoon.</li>
+            <li>The constraint forces <code>X[D, 18] = 0</code>.</li>
+        </ul>
+        <p><strong>Visualization (Morning preference for Task D):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot" title="Allowed start">
+                        <span class="slot-index">14</span
+                        ><span class="slot-time">11:30</span>
+                    </td>
+                    <td class="slot" title="Allowed start">
+                        <span class="slot-index">15</span
+                        ><span class="slot-time">11:45</span>
+                    </td>
+                    <td
+                        class="slot disallowed-preference"
+                        title="Not allowed start (afternoon)"
+                    >
+                        <span class="slot-index">16</span
+                        ><span class="slot-time">12:00</span>
+                    </td>
+                    <td
+                        class="slot disallowed-preference"
+                        title="Not allowed start (afternoon)"
+                    >
+                        <span class="slot-index">17</span
+                        ><span class="slot-time">12:15</span>
+                    </td>
+                    <td
+                        class="slot disallowed-preference"
+                        title="Not allowed start (afternoon)"
+                    >
+                        <span class="slot-index">18</span
+                        ><span class="slot-time">12:30</span>
+                    </td>
+                    <td class="slot disallowed-preference" title="... etc.">
+                        ...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="legend">
+            <span style="background-color: #e0e0e0"></span> Potential START slot
+            disallowed by preference.
+        </div>
+
+        <!-- Constraint (e): Commitments -->
+        <h3>(e) Commitments</h3>
+        <p>
+            <strong>Intuition:</strong> Scheduled tasks cannot overlap with
+            pre-existing fixed commitments.
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> if the set of slots
+            task <code>i</code> would occupy starting at <code>s</code> (i.e.,
+            <code>{s, s+1, ..., s + dur_i - 1}</code>) has any intersection with
+            the set of committed slots <code>C</code>.
+        </p>
+        <p>
+            <strong>Example:</strong> There's a commitment at slot
+            <code>s=10</code>. Task E has duration 3 slots. Where can it NOT
+            start?
+        </p>
+        <ul>
+            <li>
+                Start at <code>s=7</code>: Occupies {7, 8, 9}. No overlap with
+                {10}. OK.
+            </li>
+            <li>
+                Start at <code>s=8</code>: Occupies {8, 9, 10}. Overlaps with
+                {10}. INVALID START. <code>X[E, 8]</code> must be 0.
+            </li>
+            <li>
+                Start at <code>s=9</code>: Occupies {9, 10, 11}. Overlaps with
+                {10}. INVALID START. <code>X[E, 9]</code> must be 0.
+            </li>
+            <li>
+                Start at <code>s=10</code>: Occupies {10, 11, 12}. Overlaps with
+                {10}. INVALID START. <code>X[E, 10]</code> must be 0.
+            </li>
+            <li>
+                Start at <code>s=11</code>: Occupies {11, 12, 13}. No overlap
+                with {10}. OK.
+            </li>
+        </ul>
+        <p><strong>Visualization (Commitment at slot 10):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot" title="OK start">
+                        <span class="slot-index">7</span
+                        ><span class="slot-time">09:45</span>
+                    </td>
+                    <td
+                        class="slot disallowed-commitment-start"
+                        title="Start=8 fails (occupies 8,9,10)"
+                    >
+                        <span class="slot-index">8</span
+                        ><span class="slot-time">10:00</span>
+                    </td>
+                    <td
+                        class="slot disallowed-commitment-start"
+                        title="Start=9 fails (occupies 9,10,11)"
+                    >
+                        <span class="slot-index">9</span
+                        ><span class="slot-time">10:15</span>
+                    </td>
+                    <td
+                        class="slot committed disallowed-commitment-start"
+                        title="Commitment here. Start=10 fails (occupies 10,11,12)"
+                    >
+                        <span class="slot-index">10</span
+                        ><span class="slot-time">10:30</span>
+                    </td>
+                    <td class="slot" title="OK start">
+                        <span class="slot-index">11</span
+                        ><span class="slot-time">10:45</span>
+                    </td>
+                    <td class="slot" title="OK start">
+                        <span class="slot-index">12</span
+                        ><span class="slot-time">11:00</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="legend">
+            <span style="background-color: #666"></span> Committed Slot. &nbsp;
+            <span style="background-color: #ffd699"></span> Potential START slot
+            disallowed because the task would overlap the commitment.
+        </div>
+
+        <!-- Constraint (f): Leisure Calculation -->
+        <h3>(f) Leisure Calculation</h3>
+        <p>
+            <strong>Intuition:</strong> Leisure time (15 mins) exists only in
+            slots that are NOT committed AND NOT occupied by a task.
+        </p>
+        <p>
+            <strong>Model:</strong> Links occupation variable
+            <code>Y[s]</code> to <code>X[i, s]</code>. Then calculates leisure
+            <code>L[s]</code>: <code>L[s] = 0</code> if <code>s</code> is
+            committed OR <code>Y[s]=1</code>. Otherwise,
+            <code>L[s] <= 15</code> (objective pushes it to 15).
+        </p>
+        <p><strong>Example:</strong></p>
+        <ul>
+            <li>
+                Slot 20: Is free (not committed, no task scheduled).
+                <code>Y[20]=0</code>. Result: <code>L[20]=15</code>.
+            </li>
+            <li>Slot 21: Has a commitment. Result: <code>L[21]=0</code>.</li>
+            <li>
+                Slot 22: Is occupied by Task F. <code>Y[22]=1</code>. Result:
+                <code>L[22]=0</code>.
+            </li>
+        </ul>
+        <p><strong>Visualization (Example Slot Statuses):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td
+                        class="slot leisure-yes"
+                        title="Not committed, not occupied -> Leisure=15"
+                    >
+                        <span class="slot-index">20</span
+                        ><span class="slot-time">13:00</span>Leisure!
+                    </td>
+                    <td
+                        class="slot committed leisure-no"
+                        title="Committed -> Leisure=0"
+                    >
+                        <span class="slot-index">21</span
+                        ><span class="slot-time">13:15</span>Commit
+                    </td>
+                    <td
+                        class="slot task-occupied leisure-no"
+                        title="Task Occupied -> Leisure=0"
+                    >
+                        <span class="slot-index">22</span
+                        ><span class="slot-time">13:30</span>Task F
+                    </td>
+                    <td
+                        class="slot leisure-yes"
+                        title="Not committed, not occupied -> Leisure=15"
+                    >
+                        <span class="slot-index">23</span
+                        ><span class="slot-time">13:45</span>Leisure!
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="legend">
+            <span style="background-color: #aaffaa"></span> Leisure = 15 min.
+            &nbsp; <span style="background-color: #ffaaaa"></span> Leisure = 0
+            min.
+        </div>
+
+        <!-- Constraint (g): Daily Limits -->
+        <h3>(g) Daily Limits (Optional)</h3>
+        <p>
+            <strong>Intuition:</strong> Limit the total number of task-occupied
+            slots per day.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum(Y[s] for s in day_d) <= Limit_daily</code> for each day
+            <code>d</code>.
+        </p>
+        <p>
+            <strong>Example:</strong> Daily Limit = 6 slots for Day 0. Consider
+            scheduling Task G (dur=4, start=2) and Task H (dur=3, start=7).
+        </p>
+        <ul>
+            <li>Task G occupies slots 2, 3, 4, 5 (4 slots).</li>
+            <li>Task H occupies slots 7, 8, 9 (3 slots).</li>
+            <li>Total occupied slots on Day 0 = 4 + 3 = 7 slots.</li>
+            <li>
+                This violates the limit (7 > 6). This combination is invalid.
+            </li>
+        </ul>
+        <p><strong>Visualization (Limit = 6 slots):</strong></p>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot">
+                        <span class="slot-index">1</span
+                        ><span class="slot-time">08:15</span>
+                    </td>
+                    <td class="slot task-occupied" title="Task G">
+                        <span class="slot-index">2</span
+                        ><span class="slot-time">08:30</span>G
+                    </td>
+                    <td class="slot task-occupied" title="Task G">
+                        <span class="slot-index">3</span
+                        ><span class="slot-time">08:45</span>G
+                    </td>
+                    <td class="slot task-occupied" title="Task G">
+                        <span class="slot-index">4</span
+                        ><span class="slot-time">09:00</span>G
+                    </td>
+                    <td class="slot task-occupied" title="Task G">
+                        <span class="slot-index">5</span
+                        ><span class="slot-time">09:15</span>G
+                    </td>
+                    <td class="slot">
+                        <span class="slot-index">6</span
+                        ><span class="slot-time">09:30</span>
+                    </td>
+                    <td class="slot task-occupied" title="Task H">
+                        <span class="slot-index">7</span
+                        ><span class="slot-time">09:45</span>H
+                    </td>
+                    <td class="slot task-occupied" title="Task H">
+                        <span class="slot-index">8</span
+                        ><span class="slot-time">10:00</span>H
+                    </td>
+                    <td class="slot task-occupied" title="Task H">
+                        <span class="slot-index">9</span
+                        ><span class="slot-time">10:15</span>H
+                    </td>
+                    <td class="slot">
+                        <span class="slot-index">10</span
+                        ><span class="slot-time">10:30</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="color: red; font-weight: bold">
+            VIOLATION: Total occupied slots = 7, exceeds Daily Limit of 6.
+        </p>
+    </body>
+</html>
