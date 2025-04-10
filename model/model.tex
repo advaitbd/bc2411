@@ -57,6 +57,9 @@ The model determines the values of the following variables:
     \item \textbf{$X_{i,s}$ (Binary):} Indicates if task $i$ starts at slot $s$.
     \[ X_{i,s} = \begin{cases} 1 & \text{if task } i \in T \text{ starts at slot } s \in \{0, ..., S_{total}-1\} \\ 0 & \text{otherwise} \end{cases} \]
 
+    \item \textbf{$Z_{i}$ (Binary):} Indicates if task $i$ is scheduled at all.
+    \[ Z_{i} = \begin{cases} 1 & \text{if task } i \in T \text{ is scheduled} \\ 0 & \text{otherwise} \end{cases} \]
+    
     \item \textbf{$Y_{s}$ (Binary):} Indicates if slot $s$ is occupied by any task.
     \[ Y_{s} = \begin{cases} 1 & \text{if slot } s \in \{0, ..., S_{total}-1\} \text{ is occupied by a task} \\ 0 & \text{otherwise} \end{cases} \]
     This is an auxiliary variable linked to $X_{i,s}$ via constraints.
@@ -83,14 +86,35 @@ The objective is to maximize a weighted sum reflecting the trade-off between lei
 
 The following constraints define the feasible schedules:
 
-\subsection{Task Assignment}
-Ensures that each task is assigned exactly one starting slot within the horizon.
+\subsection{Task Assignment and Selection}
+
+Instead of requiring every task to be scheduled, the model now uses a target completion rate and allows selecting which tasks to schedule:
 
 \[
-\sum_{s=0}^{S_{total}-1} X_{i,s} = 1 \quad \forall i \in T
+Z_i = \sum_{s=0}^{S_{total}-1} X_{i,s} \quad \forall i \in T
 \]
 
-\textbf{Explanation:} For every task $i$, the sum of its binary start variables $X_{i,s}$ over all possible slots $s$ must equal 1. This forces the model to select exactly one slot $s$ where $X_{i,s}=1$ (the start slot) for each task $i$.
+\textbf{Explanation:} This links the task selection variable $Z_i$ to the start slot variables $X_{i,s}$ for every task $i$. If task $i$ is scheduled to start at any slot ($X_{i,s}=1$ for some $s$), then $Z_i=1$. Otherwise, $Z_i=0$ (task is not scheduled).
+
+\subsection{Target Completion Rate}
+Ensures that a specified minimum percentage of tasks are scheduled:
+
+\[
+\sum_{i \in T} Z_{i} \geq \lceil |T| \times \text{target\_rate} \rceil
+\]
+
+\textbf{Explanation:} The constraint ensures that at least a target percentage (default: 70\%) of all tasks are scheduled. This provides a more realistic model as it doesn't assume all tasks must be completed. The ceiling function $\lceil \cdot \rceil$ ensures a whole number of tasks are scheduled.
+
+\subsection{Hard Task Limitation}
+Restricts the number of difficult tasks scheduled on any single day:
+
+\[
+\sum_{i \in T_{\text{hard}}} \sum_{s \in \text{Slots}_{day,d}} X_{i,s} \leq 1 \quad \forall d \in \{0, ..., D-1\}
+\]
+
+where $T_{\text{hard}} = \{i \in T : d_i \geq \text{hard\_threshold}\}$ is the subset of tasks with difficulty ratings at or above the specified threshold (default: 4).
+
+\textbf{Explanation:} For each day $d$, this constraint sums the start variables $X_{i,s}$ for all hard tasks $i$ and all slots $s$ on day $d$. By limiting this sum to at most 1, the constraint ensures that at most one hard task can start on any given day. This prevents overloading days with too many challenging tasks.
 
 \subsection{Deadlines and Horizon}
 Ensures that tasks are completed by their deadline and fit entirely within the scheduling horizon.
@@ -165,9 +189,10 @@ Let $Slots_{day, d} = \{s \mid d \times S_{day} \le s < (d+1) \times S_{day}\}$ 
 If the optimization problem is feasible and a solution is found (potentially optimal or feasible within a time limit), the model output provides the values of the decision variables. This typically translates to:
 \begin{itemize}
     \item The optimal objective function value $Z$.
-    \item A schedule detailing the assigned start slot $s$ (where $X_{i,s}=1$) for each task $i$.
+    \item A schedule detailing the assigned start slot $s$ (where $X_{i,s}=1$) for each selected task $i$ (where $Z_i=1$).
     \item The calculated total leisure time $\sum L_s$.
     \item The calculated total stress score $\sum (p_i \times d_i) X_{i,s}$.
+    \item The achieved task completion rate $\frac{\sum Z_i}{|T|}$.
 \end{itemize}
 
 \end{document}

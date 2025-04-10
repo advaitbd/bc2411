@@ -133,7 +133,7 @@ PREFERENCE_MAP = {
 # GUROBI SCHEDULER FUNCTION
 # ------------------------------------------------------------
 
-def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None, time_limit_sec=30):
+def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None, time_limit_sec=30, target_completion_rate=0.7, hard_task_threshold=4):
     """
     Solves the scheduling problem using Gurobi.
 
@@ -144,6 +144,8 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
         beta (float): Weight for minimizing stress.
         daily_limit_slots (int, optional): Maximum task slots per day.
         time_limit_sec (int): Solver time limit in seconds.
+        target_completion_rate (float): Target percentage of tasks to be completed (0.0 to 1.0).
+        hard_task_threshold (int): Difficulty level threshold above which a task is considered hard (inclusive).
 
     Returns:
         dict: Optimization status and results (same format as PuLP version).
@@ -152,6 +154,7 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
     print(f"Gurobi Solver received {len(tasks)} tasks.")
     print(f"Gurobi Solver received {len(commitments)} commitment slots.")
     print(f"Gurobi Solver params: Alpha={alpha}, Beta={beta}, DailyLimitSlots={daily_limit_slots}, TimeLimit={time_limit_sec}s")
+    print(f"Target completion rate: {target_completion_rate}, Hard task threshold: {hard_task_threshold}")
 
     n_tasks = len(tasks)
     if n_tasks == 0:
@@ -173,6 +176,9 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                 # --- Decision variables ---
                 # X[i, s] = 1 if task i starts at slot s, 0 otherwise
                 X = m.addVars(n_tasks, TOTAL_SLOTS, vtype=GRB.BINARY, name="X")
+                
+                # Z[i] = 1 if task i is scheduled at all, 0 otherwise
+                Z = m.addVars(n_tasks, vtype=GRB.BINARY, name="Z")
 
                 # Y[s] = 1 if slot s is occupied by *any* task, 0 otherwise
                 Y = m.addVars(TOTAL_SLOTS, vtype=GRB.BINARY, name="Y")
@@ -188,8 +194,35 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                 m.setObjective(obj_leisure - obj_stress, GRB.MAXIMIZE)
 
                 # --- Constraints ---
-                # (a) Each task assigned exactly one starting slot
-                m.addConstrs((X.sum(i, '*') == 1 for i in range(n_tasks)), name="Assign")
+                # (a.1) Link Z[i] to X variables - task is scheduled if it has a start slot
+                for i in range(n_tasks):
+                    m.addConstr(Z[i] == X.sum(i, '*'), name=f"Link_Z_{i}")
+                
+                # (a.2) Target completion rate constraint
+                min_tasks_to_schedule = math.ceil(n_tasks * target_completion_rate)
+                m.addConstr(gp.quicksum(Z[i] for i in range(n_tasks)) >= min_tasks_to_schedule, name="TargetCompletionRate")
+                print(f"Setting target completion rate: at least {min_tasks_to_schedule} out of {n_tasks} tasks")
+                
+                # (a.3) Hard task limitation - at most one hard task per day
+                hard_tasks = [i for i in range(n_tasks) if tasks[i]["difficulty"] >= hard_task_threshold]
+                print(f"Identified {len(hard_tasks)} hard tasks with difficulty >= {hard_task_threshold}")
+                
+                for d in range(TOTAL_DAYS):
+                    day_start_slot = d * SLOTS_PER_DAY
+                    day_end_slot = day_start_slot + SLOTS_PER_DAY
+                    
+                    # Sum of scheduled hard tasks starting within this day
+                    hard_task_vars_for_day = gp.quicksum(X[i, s] for i in hard_tasks 
+                                               for s in range(day_start_slot, day_end_slot))
+                    
+                    if hard_tasks:  # Only add constraint if there are hard tasks
+                        m.addConstr(hard_task_vars_for_day <= 1, name=f"MaxOneHardTask_Day_{d}")
+                        print(f"  Constraint Day {d}: Max 1 hard task (difficulty >= {hard_task_threshold})")
+                        
+                # (a.4) Each scheduled task can have at most one starting slot
+                for i in range(n_tasks):
+                    m.addConstr(X.sum(i, '*') <= Z[i], name=f"TaskHasAtMostOneStart_{i}")
+                    m.addConstr(X.sum(i, '*') >= Z[i], name=f"TaskHasAtLeastOneStart_{i}")
 
                 # (b) Deadlines & Horizon: Task must finish by deadline and fit within horizon
                 for i in range(n_tasks):
@@ -352,6 +385,11 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
 
                         schedule_records.sort(key=lambda x: x["start_slot"])
 
+                        # Calculate completion rate
+                        scheduled_tasks = sum(1 for i in range(n_tasks) if Z[i].X > solution_threshold)
+                        completion_rate = scheduled_tasks / n_tasks if n_tasks > 0 else 0
+                        print(f"Scheduled {scheduled_tasks} out of {n_tasks} tasks ({completion_rate:.1%})")
+                        
                         # Calculate total leisure from L_var values
                         total_leisure_val = gp.quicksum(L_var[s].X for s in range(TOTAL_SLOTS)).getValue()
 
@@ -375,7 +413,8 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                             "schedule": schedule_records,
                             "total_leisure": round(total_leisure_val, 1),
                             "total_stress": round(calculated_stress, 1),
-                            "solve_time_seconds": round(solve_time, 2)
+                            "solve_time_seconds": round(solve_time, 2),
+                            "completion_rate": round(completion_rate, 2)
                         }
                     else: # Status indicated solution possible, but SolCount is 0
                         print(f"Gurobi Solver: Status is {gurobi_status_str} but no solution found (SolCount=0).")
@@ -586,8 +625,8 @@ def solve_schedule_pulp(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slo
     # --- Solve ---
     print("Solver: Solving the model...")
     try:
-        # Use default CBC solver, increase verbosity (msg=1) for debugging if needed
-        solver = PULP_CBC_CMD(msg=0, timeLimit=30) # Add a time limit (e.g., 30 seconds)
+        # Use default CBC solver, increase verbosity (msg=True) for debugging if needed
+        solver = PULP_CBC_CMD(msg=False, timeLimit=30) # Add a time limit (e.g., 30 seconds)
         status = model.solve(solver)
         solve_time = model.solutionTime
         print(f"Solver status: {LpStatus[status]} (solved in {solve_time:.2f}s)")
@@ -652,10 +691,10 @@ def solve_schedule_pulp(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slo
         schedule_records.sort(key=lambda x: x["start_slot"])
 
         # Calculate total leisure from L_var values
-        total_leisure_val = sum(L_var[s].varValue for s in range(TOTAL_SLOTS) if L_var[s].varValue is not None)
+        total_leisure_val = sum((L_var[s].varValue or 0) for s in range(TOTAL_SLOTS))
 
         # Recalculate total stress based on the objective function's stress component value
-        stress_component_value = sum(X[(i, s)].varValue * (tasks[i]["priority"] * tasks[i]["difficulty"])
+        stress_component_value = sum((X[(i, s)].varValue or 0) * (tasks[i]["priority"] * tasks[i]["difficulty"])
                                      for i in range(n_tasks) for s in range(TOTAL_SLOTS)
                                      if (i, s) in X and X[(i, s)].varValue is not None and X[(i, s)].varValue > solution_threshold)
         calculated_stress = stress_component_value

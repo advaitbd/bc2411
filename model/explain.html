@@ -779,5 +779,183 @@
         <p style="color: red; font-weight: bold">
             VIOLATION: Total occupied slots = 7, exceeds Daily Limit of 6.
         </p>
+        
+        <!-- Constraint (h): Target Completion Rate -->
+        <h3>(h) Target Completion Rate</h3>
+        <p>
+            <strong>Intuition:</strong> Users may not realistically complete all tasks. The model aims for a target percentage of scheduled tasks instead of assuming 100% completion.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            Introduces binary variable <code>Z[i]</code> indicating if task <code>i</code> is scheduled at all.
+            <code>Z[i] = Sum(X[i, s] for all s)</code> links task selection with starting slots.
+            <code>Sum(Z[i] for all i in T) >= ceil(|T| * target_rate)</code> ensures at least the target percentage of tasks are scheduled.
+        </p>
+        <p>
+            <strong>Example:</strong> With 10 tasks and target rate of 0.7 (70%), at least 7 tasks must be scheduled.
+        </p>
+        <ul>
+            <li>Tasks A, B, C, D, E, F, G are scheduled (<code>Z[A...G] = 1</code>)</li>
+            <li>Tasks H, I, J are not scheduled (<code>Z[H...J] = 0</code>)</li>
+            <li>Total scheduled tasks = 7/10 = 70%</li>
+            <li>This satisfies the target rate constraint (7 ≥ 7)</li>
+        </ul>
+        <p><strong>Visualization (Task Selection with Target Rate 70%):</strong></p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Task</th>
+                    <th>Priority</th>
+                    <th>Difficulty</th>
+                    <th>Duration</th>
+                    <th>Selected (Z=1)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Task A</td>
+                    <td>5</td>
+                    <td>3</td>
+                    <td>4 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task B</td>
+                    <td>4</td>
+                    <td>2</td>
+                    <td>3 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task C</td>
+                    <td>3</td>
+                    <td>4</td>
+                    <td>2 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task D</td>
+                    <td>5</td>
+                    <td>5</td>
+                    <td>1 slot</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task E</td>
+                    <td>2</td>
+                    <td>1</td>
+                    <td>6 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task F</td>
+                    <td>4</td>
+                    <td>3</td>
+                    <td>2 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task G</td>
+                    <td>3</td>
+                    <td>2</td>
+                    <td>5 slots</td>
+                    <td style="background-color: #aaffaa;">Yes</td>
+                </tr>
+                <tr>
+                    <td>Task H</td>
+                    <td>1</td>
+                    <td>2</td>
+                    <td>3 slots</td>
+                    <td style="background-color: #ffaaaa;">No</td>
+                </tr>
+                <tr>
+                    <td>Task I</td>
+                    <td>2</td>
+                    <td>3</td>
+                    <td>7 slots</td>
+                    <td style="background-color: #ffaaaa;">No</td>
+                </tr>
+                <tr>
+                    <td>Task J</td>
+                    <td>1</td>
+                    <td>1</td>
+                    <td>4 slots</td>
+                    <td style="background-color: #ffaaaa;">No</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            The model strategically selects which tasks to schedule, usually prioritizing higher priority and lower difficulty tasks, while satisfying the minimum 70% completion rate.
+        </p>
+
+        <!-- Constraint (i): Hard Task Limitation -->
+        <h3>(i) Hard Task Limitation</h3>
+        <p>
+            <strong>Intuition:</strong> Schedule at most one hard task per day to prevent user overwhelm and burnout.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum(X[i, s] for i in T_hard for s in day_d_slots) <= 1</code> for each day <code>d</code>,
+            where <code>T_hard = {i in T : difficulty[i] >= hard_threshold}</code> is the set of tasks with difficulty rating at or above the threshold (default: 4).
+        </p>
+        <p>
+            <strong>Example:</strong> Tasks C (difficulty=4) and D (difficulty=5) are both hard tasks. Can they be scheduled on the same day?
+        </p>
+        <ul>
+            <li>If Task C is scheduled on Day 1, Task D cannot also be scheduled on Day 1.</li>
+            <li>Task D must be scheduled on a different day (e.g., Day 2).</li>
+        </ul>
+        <p><strong>Visualization (Hard Tasks Distribution):</strong></p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Task</th>
+                    <th>Difficulty</th>
+                    <th>Hard? (≥4)</th>
+                    <th>Scheduled Day</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Task A</td>
+                    <td>3</td>
+                    <td>No</td>
+                    <td>Day 0</td>
+                </tr>
+                <tr>
+                    <td>Task B</td>
+                    <td>2</td>
+                    <td>No</td>
+                    <td>Day 0</td>
+                </tr>
+                <tr style="background-color: #ffe6e6;">
+                    <td>Task C</td>
+                    <td>4</td>
+                    <td>Yes</td>
+                    <td>Day 1</td>
+                </tr>
+                <tr style="background-color: #ffe6e6;">
+                    <td>Task D</td>
+                    <td>5</td>
+                    <td>Yes</td>
+                    <td>Day 2</td>
+                </tr>
+                <tr>
+                    <td>Task E</td>
+                    <td>1</td>
+                    <td>No</td>
+                    <td>Day 3</td>
+                </tr>
+                <tr style="background-color: #ffe6e6;">
+                    <td>Task F</td>
+                    <td>4</td>
+                    <td>Yes</td>
+                    <td>Day 3</td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="font-weight: bold">
+            Notice that each hard task (C, D, F) is scheduled on a different day or shares a day only with non-hard tasks.
+        </p>
     </body>
 </html>
