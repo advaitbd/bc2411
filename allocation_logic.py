@@ -402,6 +402,7 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
         print(f"An unexpected error occurred during Gurobi optimization: {e}")
         print(traceback.format_exc())
         return {"status": "Error", "message": f"Unexpected error during optimization: {e}"}
+
 def solve_schedule_pulp(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None):
     """
     Solves the scheduling problem using PuLP.

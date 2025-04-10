@@ -101,6 +101,7 @@ const parseLocalISO = (dateString: string | null | undefined): Date | null => {
 interface TaskFormData {
   name: string;
   priority: number;
+  difficulty: number; // Add difficulty field
   duration: number;
   deadline: string | number; // For relative days input
   deadlineType: "days" | "date";
@@ -167,6 +168,7 @@ function App() {
     () => ({
       name: "",
       priority: 3,
+      difficulty: 1, // Default difficulty (easy)
       duration: 60,
       deadline: 3, // Default to 3 days from now (for relative input)
       deadlineType: "days",
@@ -261,6 +263,7 @@ function App() {
       setEditTaskData({
         name: editingTask.name,
         priority: editingTask.priority,
+        difficulty: editingTask.difficulty || 1,
         duration: editingTask.duration,
         deadline: deadlineValue,
         deadlineType: deadlineType,
@@ -582,6 +585,7 @@ function App() {
     return {
       name: taskData.name.trim(),
       priority: taskData.priority || 1,
+      difficulty: taskData.difficulty || 1,
       duration: duration,
       deadline: deadlineValue,
       preference: taskData.preference,
@@ -861,6 +865,27 @@ function App() {
             className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
           />
         </div>
+        <div>
+          <label
+            htmlFor={`${formIdPrefix}TaskDifficulty`}
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Difficulty (1=Easy, 5=Hard)
+          </label>
+          <input
+            id={`${formIdPrefix}TaskDifficulty`}
+            name="difficulty"
+            type="number"
+            min="1"
+            max="5"
+            value={formData.difficulty}
+            onChange={onChange}
+            required
+            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label
             htmlFor={`${formIdPrefix}TaskDuration`}
