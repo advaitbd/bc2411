@@ -169,35 +169,47 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
     LN_10_OVER_3 = math.log(10/3) # Approx 1.204
 
     schedulable_tasks = []
-    unschedulable_tasks_info = []
+    unschedulable_tasks_info = [] # Changed field name for clarity
     original_task_count = len(tasks)
 
     for i, task in enumerate(tasks):
         duration_min = task["duration_slots"] * 15
-        difficulty = task.get("difficulty", 1) # Default to 1 if missing
-        priority = task.get("priority", 1) # Default to 1 if missing
+        difficulty = task.get("difficulty", 1)
+        priority = task.get("priority", 1)
+        task_id = task.get('id', f"task-orig-{i}")
+        task_name = task.get('name', f"Task {i}")
 
-        # Ensure non-zero difficulty/priority for the check if they can be zero
         if difficulty <= 0 or priority <= 0:
-             print(f"Warning: Task '{task.get('name', i)}' has non-positive difficulty ({difficulty}) or priority ({priority}). Excluding from Pi check and scheduling.")
+             print(f"Warning: Task '{task_name}' ({task_id}) has non-positive difficulty ({difficulty}) or priority ({priority}). Excluding from Pi check and scheduling.")
              unschedulable_tasks_info.append({
-                 "id": task.get('id', f"task-orig-{i}"),
-                 "name": task.get('name', f"Task {i}"),
-                 "reason": "Non-positive difficulty or priority"
+                 "id": task_id,
+                 "name": task_name,
+                 "reason": "Non-positive difficulty or priority",
+                 "required_duration_min": None, # Indicate not applicable
+                 "current_duration_min": duration_min,
              })
              continue
 
         stress_factor = difficulty * priority
-        required_duration_min = stress_factor * LN_10_OVER_3
+        required_duration_min_float = stress_factor * LN_10_OVER_3
+        # Round up to nearest minute for requirement
+        required_duration_min_int = math.ceil(required_duration_min_float)
 
-        if duration_min >= required_duration_min:
-            schedulable_tasks.append(task.copy()) # Use a copy
+        if duration_min >= required_duration_min_float: # Use float for comparison accuracy
+            schedulable_tasks.append(task.copy())
         else:
-            print(f"Task '{task.get('name', i)}' filtered out: Duration ({duration_min}m) is less than required ({required_duration_min:.1f}m) for Pi>=0.7 (Diff={difficulty}, Prio={priority}).")
+            reason_str = (
+                f"Pi < 0.7 condition not met. Required duration: "
+                f"~{required_duration_min_int} min, Actual: {duration_min} min "
+                f"(based on Difficulty: {difficulty}, Priority: {priority})"
+            )
+            print(f"Task '{task_name}' ({task_id}) filtered out: {reason_str}")
             unschedulable_tasks_info.append({
-                 "id": task.get('id', f"task-orig-{i}"),
-                 "name": task.get('name', f"Task {i}"),
-                 "reason": f"Pi < 0.7 (Required duration {required_duration_min:.1f}m > Actual {duration_min}m)"
+                 "id": task_id,
+                 "name": task_name,
+                 "reason": reason_str,
+                 "required_duration_min": required_duration_min_int, # Provide the calculated requirement
+                 "current_duration_min": duration_min,
             })
 
     n_tasks = len(schedulable_tasks) # Number of tasks to actually schedule
@@ -208,11 +220,16 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
         total_possible_minutes = TOTAL_SLOTS * 15
         committed_minutes = len(commitments) * 15
         initial_leisure = total_possible_minutes - committed_minutes
-        message = "No tasks provided or all tasks were filtered out by the Pi>=0.7 condition."
+        message = "No tasks provided or all tasks were filtered out."
         if unschedulable_tasks_info:
-            message += " Filtered tasks: " + ", ".join([f"{t['name']} ({t['reason']})" for t in unschedulable_tasks_info])
+             # Example of constructing a more detailed message if needed
+             filtered_names = [f"{t['name']} (needs {t['required_duration_min']}m)" for t in unschedulable_tasks_info if t['required_duration_min'] is not None]
+             if filtered_names:
+                  message += f" Filtered tasks needing more time: {', '.join(filtered_names)}."
+             else: # Only non-positive diff/prio tasks
+                  message += " Some tasks filtered due to non-positive difficulty/priority."
 
-        return {'status': 'Optimal', 'schedule': [], 'total_leisure': initial_leisure, 'total_stress': 0.0, 'message': message, 'filtered_tasks': unschedulable_tasks_info}
+        return {'status': 'No Schedulable Tasks', 'schedule': [], 'total_leisure': initial_leisure, 'total_stress': 0.0, 'message': message, 'filtered_tasks_info': unschedulable_tasks_info}
 
     # --- Create Gurobi Model ---
     try:
@@ -472,15 +489,17 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                     "total_leisure": round(final_total_leisure, 1),
                     "total_stress": round(final_total_stress, 1),
                     "solve_time_seconds": round(solve_time, 2),
-                    "completion_rate": round(completion_rate, 2), # Based on original task count
+                    "completion_rate": round(completion_rate, 2),
                     "message": message,
-                    "filtered_tasks_info": unschedulable_tasks_info # Include info on filtered tasks
+                    "filtered_tasks_info": unschedulable_tasks_info # Ensure this is returned
                 }
 
     except gp.GurobiError as e:
         print(f"Gurobi Error code {e.errno}: {e}")
+        # Ensure filtered_tasks_info is included even on Gurobi error
         return {"status": "Error", "message": f"Gurobi Error: {e}", "filtered_tasks_info": unschedulable_tasks_info}
     except Exception as e:
         print(f"An unexpected error occurred during Gurobi optimization: {e}")
         print(traceback.format_exc())
+        # Ensure filtered_tasks_info is included even on unexpected error
         return {"status": "Error", "message": f"Unexpected error during optimization: {e}", "filtered_tasks_info": unschedulable_tasks_info}

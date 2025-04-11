@@ -35,6 +35,7 @@ def auto_generate_tasks(num_tasks=10):
     Deadlines are returned as naive local ISO strings.
     """
     print(f"--- Running auto_generate_tasks (num_tasks={num_tasks}) ---")
+    # ... (task_types, courses, pref_choices remain the same) ...
     task_types = [
         ("Assignment", 3, 5, 60),           # (type, avg priority, avg difficulty, avg duration_min)
         ("Study Session", 2, 2, 45),
@@ -54,7 +55,7 @@ def auto_generate_tasks(num_tasks=10):
     pref_choices = ["morning", "afternoon", "evening", "any"] # Added 'any'
 
     tasks = []
-    day0 = get_day0() # Get reference date (naive local)
+    day0 = get_day0()
 
     for i in range(num_tasks):
         task_type, base_prio, base_diff, base_dur_min = random.choice(task_types)
@@ -63,24 +64,21 @@ def auto_generate_tasks(num_tasks=10):
 
         prio = max(1, min(5, int(base_prio + random.randint(-1, 1))))
         diff = max(1, min(5, int(base_diff + random.randint(-1, 1))))
-        # Duration variation: +/- 15 mins, minimum 15 mins
         duration_min = max(15, int(base_dur_min + random.choice([-15, 0, 15])))
 
-        # Determine deadline day (relative to day0)
+        # ... (deadline calculation remains the same) ...
         if task_type in ["Group Project", "Essay", "Research"]:
-            deadline_day_relative = random.randint(4, TOTAL_DAYS - 1) # Day index 4, 5, or 6
+            deadline_day_relative = random.randint(4, TOTAL_DAYS - 1)
         elif task_type in ["Exam Prep", "Lab Report"]:
-            deadline_day_relative = random.randint(1, 3) # Day index 1, 2, or 3
+            deadline_day_relative = random.randint(1, 3)
         else:
-            deadline_day_relative = random.randint(2, 5) # Day index 2, 3, 4, or 5
+            deadline_day_relative = random.randint(2, 5)
 
-        # Calculate absolute deadline date (end of that day)
         deadline_date = day0 + timedelta(days=deadline_day_relative)
-        # Set time to 21:59:59 on that day (local naive)
         deadline_dt = deadline_date.replace(hour=21, minute=59, second=59, microsecond=999999)
-        deadline_iso_local = deadline_dt.isoformat() # NO 'Z'
+        deadline_iso_local = deadline_dt.isoformat()
 
-        # Set Preference
+        # ... (preference selection remains the same) ...
         if task_type in ["Study Session", "Reading", "Research"]:
             pref = random.choice(pref_choices)
         elif task_type in ["Exam Prep", "Presentation Prep"]:
@@ -89,12 +87,14 @@ def auto_generate_tasks(num_tasks=10):
             pref = random.choice(["afternoon", "evening", "any", "any"])
 
         tasks.append({
-            "id": f"task-gen-{i+1}", # Add an ID for frontend keys
+            "id": f"task-gen-{i+1}",
             "name": name,
             "priority": prio,
             "difficulty": diff,
-            "duration_min": duration_min,
-            "deadline": deadline_iso_local, # Send naive local ISO string
+            # --- CHANGE HERE: Use 'duration' field ---
+            "duration": duration_min,
+            # ----------------------------------------
+            "deadline": deadline_iso_local,
             "preference": pref
         })
     print(f"Generated {len(tasks)} tasks.")
@@ -239,7 +239,7 @@ def auto_generate_data():
 
 @app.route('/api/optimize', methods=['POST'])
 def optimize_schedule():
-    _ = get_day0() # Ensure DAY0 is initialized
+    _ = get_day0()
     print(f"\n--- Received request for /api/optimize at {datetime.now()} ---")
     print(f"Reference DAY0 (naive local): {get_day0()}")
 
@@ -254,12 +254,8 @@ def optimize_schedule():
         tasks_input = data.get('tasks', [])
         blocked_input = data.get('blockedIntervals', [])
         settings_input = data.get('settings', {})
-        start_hour_pref = settings_input.get('startHour', 8)
-        end_hour_pref = settings_input.get('endHour', 22)
-        # Note: start/end hour prefs are not used by the solver directly yet
-        print(f"Frontend Time Window Preference: {start_hour_pref:02d}:00 - {end_hour_pref:02d}:00")
+        # ... (start/end hour prefs remain unused for now) ...
 
-        # --- 1. Parse and Validate Tasks (Logic Unchanged) ---
         parsed_tasks = []
         task_errors = []
         day0_ref = get_day0()
@@ -268,28 +264,28 @@ def optimize_schedule():
             task_id = t.get('id', f'task-input-{idx+1}')
             name = t.get('name')
             priority = t.get('priority')
-            difficulty = t.get('difficulty', 1) # Get difficulty from frontend if available
-            duration_min = t.get('duration')
+            difficulty = t.get('difficulty') # Difficulty expected from frontend now
+            # --- CHANGE HERE: Expect 'duration' from frontend ---
+            duration_min_input = t.get('duration')
+            # ----------------------------------------------------
             deadline_input = t.get('deadline')
             preference = t.get('preference', 'any')
 
-            if not name:
-                task_errors.append(f"Task {idx+1}: Name is missing.")
-                continue
+            # Basic Validation
+            if not name: task_errors.append(f"Task {idx+1}: Name is missing."); continue
             try:
                 priority = int(priority) if priority is not None else 1
                 difficulty = int(difficulty) if difficulty is not None else 1
-                duration_min = int(duration_min) if duration_min is not None else 15
-                if duration_min <= 0:
-                    task_errors.append(f"Task '{name}': Duration must be positive.")
-                    continue
+                # --- CHANGE HERE: Parse duration_min_input ---
+                duration_min = int(duration_min_input) if duration_min_input is not None else 15
+                # ---------------------------------------------
+                if duration_min <= 0: task_errors.append(f"Task '{name}': Duration must be positive."); continue
                 priority = max(1, min(priority, 5))
-                difficulty = max(1, min(difficulty, 5)) # Clamp difficulty too
+                difficulty = max(1, min(difficulty, 5))
             except (ValueError, TypeError):
-                task_errors.append(f"Task '{name}': Priority, difficulty, and duration must be numbers.")
-                continue
+                task_errors.append(f"Task '{name}': Priority, difficulty, or duration is not a valid number."); continue
 
-            # --- Deadline Parsing (Logic Unchanged) ---
+            # --- Deadline Parsing (remains the same) ---
             deadline_dt_local = None
             deadline_slot = TOTAL_SLOTS - 1
             if isinstance(deadline_input, (int, float)):
@@ -298,45 +294,38 @@ def optimize_schedule():
                     deadline_date = day0_ref + timedelta(days=relative_days)
                     deadline_dt_local = deadline_date.replace(hour=21, minute=59, second=59, microsecond=999999)
                     print(f"Task '{name}': Relative deadline {relative_days} days -> Local Deadline DT: {deadline_dt_local}")
-                else:
-                    task_errors.append(f"Task '{name}': Relative deadline days must be non-negative.")
-                    continue
+                else: task_errors.append(f"Task '{name}': Relative deadline days must be non-negative."); continue
             elif isinstance(deadline_input, str):
                 deadline_dt_local = parse_datetime_to_naive_local(deadline_input)
-                if not deadline_dt_local:
-                    task_errors.append(f"Task '{name}': Invalid deadline format '{deadline_input}'.")
-                    continue
+                if not deadline_dt_local: task_errors.append(f"Task '{name}': Invalid deadline format '{deadline_input}'."); continue
                 print(f"Task '{name}': Parsed deadline string '{deadline_input}' -> Local Deadline DT: {deadline_dt_local}")
-            else:
-                task_errors.append(f"Task '{name}': Deadline is missing or has invalid type.")
-                continue
+            else: task_errors.append(f"Task '{name}': Deadline is missing or has invalid type."); continue
 
             if deadline_dt_local:
-                if deadline_dt_local < day0_ref:
-                     task_errors.append(f"Task '{name}': Deadline ({deadline_dt_local.strftime('%Y-%m-%d %H:%M')}) cannot be in the past relative to DAY0 ({day0_ref.strftime('%Y-%m-%d %H:%M')}).")
-                     continue
+                if deadline_dt_local < day0_ref: task_errors.append(f"Task '{name}': Deadline cannot be in the past."); continue
                 deadline_slot = datetime_to_slot(deadline_dt_local)
                 print(f"  Converted local deadline to slot: {deadline_slot}")
 
+            # --- Convert duration_min to duration_slots for the solver ---
             duration_slots = math.ceil(duration_min / 15.0)
             if duration_slots <= 0: duration_slots = 1
+            # -------------------------------------------------------------
 
             if deadline_slot < duration_slots - 1:
-                 effective_deadline_time = slot_to_datetime(deadline_slot) + timedelta(minutes=15)
-                 task_errors.append(f"Task '{name}': Deadline ({effective_deadline_time.strftime('%Y-%m-%d %H:%M')}, slot {deadline_slot}) is too early for the duration ({duration_min} min / {duration_slots} slots). Minimum required end slot: {duration_slots - 1}")
-                 continue
+                effective_deadline_time = slot_to_datetime(deadline_slot) + timedelta(minutes=15)
+                task_errors.append(f"Task '{name}': Deadline ({effective_deadline_time.strftime('%Y-%m-%d %H:%M')}, slot {deadline_slot}) is too early for the duration ({duration_min} min / {duration_slots} slots).")
+                continue
 
             parsed_tasks.append({
                 "id": task_id,
                 "name": name,
                 "priority": priority,
-                "difficulty": difficulty, # Pass difficulty to solver
-                "duration_slots": duration_slots,
+                "difficulty": difficulty,
+                "duration_slots": duration_slots, # Pass slots to solver
                 "deadline_slot": deadline_slot,
                 "preference": preference.lower() if preference else 'any'
             })
 
-        # --- 2. Parse Blocked Intervals (Logic Unchanged) ---
         parsed_commitments = {}
         commitment_errors = []
         for idx, block in enumerate(blocked_input):
@@ -408,13 +397,12 @@ def optimize_schedule():
              print("No valid tasks provided. Returning baseline leisure.")
         else:
              print(f"\nCalling Gurobi solver with {len(parsed_tasks)} tasks, {len(parsed_commitments)} commitment slots...")
-             results = solve_schedule_gurobi( # Changed function name
+             results = solve_schedule_gurobi(
                  tasks=parsed_tasks,
                  commitments=parsed_commitments,
                  alpha=alpha,
                  beta=beta,
                  daily_limit_slots=daily_limit_slots
-                 # time_limit_sec=30 # Can pass time limit if needed
              )
 
         # --- Post-processing (Logic Unchanged) ---

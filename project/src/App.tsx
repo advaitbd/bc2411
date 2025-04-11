@@ -1,6 +1,6 @@
 // bc2411/project/src/App.tsx
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Calendar,
   Clock,
@@ -16,6 +16,8 @@ import {
   Info,
   Trash2,
   Edit,
+  HelpCircle, // Import HelpCircle for hints
+  CheckCircle, // Import CheckCircle for the new button
 } from "lucide-react";
 import {
   format,
@@ -40,11 +42,12 @@ const API_BASE_URL = "http://localhost:5001/api"; // Backend URL
 const GRID_START_HOUR = 8;
 const GRID_END_HOUR = 22; // Display up to 22:00 (exclusive end for loop)
 
+// --- Interfaces ---
 interface Task {
   id: string; // Keep track of tasks
   name: string;
   priority: number;
-  difficulty?: number; // Optional on input, backend defaults
+  difficulty: number; // Difficulty is now required in Task interface
   duration: number; // Duration in minutes
   deadline: string | number; // ISO string (local assumed) or relative days
   preference: "morning" | "afternoon" | "evening" | "any";
@@ -69,6 +72,15 @@ interface ScheduledTaskItem {
   preference: string;
   start_slot: number; // Added by backend
   end_slot: number; // Added by backend
+}
+
+// Interface for filtered task info from backend
+interface FilteredTaskInfo {
+  id: string;
+  name: string;
+  reason: string;
+  required_duration_min: number | null; // Can be null if filtered for other reasons
+  current_duration_min: number;
 }
 
 // Keep track of scheduled tasks per day (key: 'yyyy-MM-dd')
@@ -141,12 +153,14 @@ function App() {
     status: string | null;
     message: string | null;
     warnings: string[] | null;
+    filteredTasksInfo: FilteredTaskInfo[] | null; // Add field to store filtered info
   }>({
     totalLeisure: null,
     totalStress: null,
     status: null,
     message: null,
     warnings: null,
+    filteredTasksInfo: null, // Initialize as null
   });
   const [selectedEvent, setSelectedEvent] = useState<
     ScheduledTaskItem | BlockedInterval | null
@@ -162,6 +176,10 @@ function App() {
   const [editingBlock, setEditingBlock] = useState<BlockedInterval | null>(
     null,
   );
+  // State to store the required duration hint for the edit form
+  const [editTaskMinDurationHint, setEditTaskMinDurationHint] = useState<
+    number | null
+  >(null);
 
   // --- Memoized Default Form Data ---
   const defaultTaskData = useMemo<TaskFormData>(
@@ -218,21 +236,24 @@ function App() {
   useEffect(() => {
     setIsOptimized(false);
     setOptimizedSchedule({});
-    setOptimizationResult({
-      totalLeisure: null,
-      totalStress: null,
-      status: null,
-      message: null,
-      warnings: null,
-    });
+    setOptimizationResult((prev) => ({ ...prev, filteredTasksInfo: null })); // Clear filtered info too
+    setError(null); // Also clear general errors
   }, [tasks, blockedIntervals, startHour, endHour]);
+
+  // Helper to get task by ID
+  const getTaskById = useCallback(
+    (taskId: string): Task | undefined => {
+      return tasks.find((task) => task.id === taskId);
+    },
+    [tasks],
+  );
 
   // Populate edit form when editingTask changes
   useEffect(() => {
     if (editingTask) {
       let deadlineType: "days" | "date" = "date";
       let deadlineValue: string | number = editingTask.deadline;
-      let deadlineDateValue = format(new Date(), "yyyy-MM-dd"); // Default
+      let deadlineDateValue = format(new Date(), "yyyy-MM-dd");
 
       if (typeof editingTask.deadline === "number") {
         deadlineType = "days";
@@ -251,7 +272,7 @@ function App() {
           deadlineValue = Math.max(0, relativeDays);
         } else {
           console.warn(
-            "Invalid deadline string found while editing task:",
+            "Invalid deadline string for edit:",
             editingTask.deadline,
           );
           deadlineType = "days";
@@ -263,7 +284,7 @@ function App() {
       setEditTaskData({
         name: editingTask.name,
         priority: editingTask.priority,
-        difficulty: editingTask.difficulty || 1,
+        difficulty: editingTask.difficulty, // Assume difficulty is always present now
         duration: editingTask.duration,
         deadline: deadlineValue,
         deadlineType: deadlineType,
@@ -271,13 +292,16 @@ function App() {
         deadlineDate: deadlineDateValue,
       });
       setShowEditTaskForm(true);
+      // Clear hint initially, will be set if editing a filtered task
+      setEditTaskMinDurationHint(null);
     } else {
       setEditTaskData(null);
       setShowEditTaskForm(false);
+      setEditTaskMinDurationHint(null);
     }
   }, [editingTask]);
 
-  // Populate edit form when editingBlock changes
+  // Populate edit block form when editingBlock changes
   useEffect(() => {
     if (editingBlock) {
       const start = parseLocalISO(editingBlock.startTime);
@@ -302,11 +326,12 @@ function App() {
   const resetNewBlockForm = () => setNewBlockData(defaultBlockData);
   const closeAndResetEditTaskForm = () => {
     setEditingTask(null);
-    setError(null);
+    setError(null); // Clear form-specific error on close
+    setEditTaskMinDurationHint(null);
   };
   const closeAndResetEditBlockForm = () => {
     setEditingBlock(null);
-    setError(null);
+    setError(null); // Clear form-specific error on close
   };
 
   // --- API Call Functions ---
@@ -322,6 +347,7 @@ function App() {
       status: null,
       message: null,
       warnings: null,
+      filteredTasksInfo: null,
     });
 
     try {
@@ -334,7 +360,12 @@ function App() {
       }
       const data = await response.json();
       console.log("Auto-generated data:", data);
-      setTasks(data.tasks);
+      // Ensure difficulty is present (backend should provide it, but fallback just in case)
+      const tasksWithDifficulty = data.tasks.map((t: any) => ({
+        ...t,
+        difficulty: t.difficulty ?? 1,
+      }));
+      setTasks(tasksWithDifficulty);
       setBlockedIntervals(data.blockedIntervals);
       setMode("auto");
     } catch (err) {
@@ -354,29 +385,33 @@ function App() {
 
   const handleOptimize = async () => {
     setIsLoading(true);
-    setError(null);
+    setError(null); // Clear general error
     setOptimizedSchedule({});
     setIsOptimized(false);
+    // Reset optimization results, keeping null for filtered tasks initially
     setOptimizationResult({
       totalLeisure: null,
       totalStress: null,
       status: null,
       message: null,
       warnings: null,
+      filteredTasksInfo: null,
     });
 
     const tasksToSend = tasks.map((task) => ({
-      ...task,
+      id: task.id,
+      name: task.name,
+      priority: task.priority,
+      difficulty: task.difficulty, // Send difficulty
+      duration: task.duration, // Send original duration in minutes
       deadline: task.deadline,
+      preference: task.preference,
     }));
 
     const payload = {
       tasks: tasksToSend,
       blockedIntervals: blockedIntervals,
-      settings: {
-        startHour: startHour,
-        endHour: endHour,
-      },
+      settings: { startHour: startHour, endHour: endHour },
     };
 
     console.log("Sending to /api/optimize:", JSON.stringify(payload, null, 2));
@@ -392,18 +427,29 @@ function App() {
       console.log("Optimization response:", result);
 
       if (!response.ok) {
-        throw new Error(
+        // Keep filtered tasks info even on error if backend provides it
+        setOptimizationResult((prev) => ({
+          ...prev,
+          status: result.status || "Error",
+          message:
+            result.error ||
+            result.message ||
+            `HTTP error! status: ${response.status}`,
+          warnings: result.warnings || null,
+          filteredTasksInfo: result.filtered_tasks_info || null, // Store filtered info
+        }));
+        setError(
           result.error ||
             result.message ||
             `HTTP error! status: ${response.status}`,
         );
+        setIsLoading(false);
+        return; // Stop processing further
       }
 
-      if (
-        (result.status === "Optimal" || result.status === "Feasible") &&
-        result.schedule
-      ) {
-        const scheduleByDate: OptimizedSchedule = {};
+      // --- Process successful response ---
+      const scheduleByDate: OptimizedSchedule = {};
+      if (result.schedule && Array.isArray(result.schedule)) {
         result.schedule.forEach((item: ScheduledTaskItem) => {
           const startTime = parseLocalISO(item.startTime);
           if (startTime) {
@@ -413,42 +459,49 @@ function App() {
             }
             scheduleByDate[dateKey].push(item);
           } else {
-            console.warn(
-              "Could not parse start time for scheduled item, skipping:",
-              item,
-            );
+            console.warn("Could not parse start time, skipping item:", item);
           }
         });
-
         Object.keys(scheduleByDate).forEach((dateKey) => {
-          scheduleByDate[dateKey].sort((a, b) => {
-            const timeA = parseLocalISO(a.startTime)?.getTime() || 0;
-            const timeB = parseLocalISO(b.startTime)?.getTime() || 0;
-            return timeA - timeB;
-          });
+          scheduleByDate[dateKey].sort(
+            (a, b) =>
+              (parseLocalISO(a.startTime)?.getTime() || 0) -
+              (parseLocalISO(b.startTime)?.getTime() || 0),
+          );
         });
-
         setOptimizedSchedule(scheduleByDate);
-        setIsOptimized(true);
-        setOptimizationResult({
-          totalLeisure: result.total_leisure,
-          totalStress: result.total_stress,
-          status: result.status,
-          message: `Schedule generated successfully (${result.status}).`,
-          warnings: result.warnings || null,
-        });
+        setIsOptimized(true); // Set optimized only if schedule data is present
       } else {
-        const failureMessage =
+        console.warn("No valid schedule array received in response.");
+        setOptimizedSchedule({});
+        setIsOptimized(false);
+      }
+
+      // Update the full optimization result state, including filtered tasks
+      setOptimizationResult({
+        totalLeisure: result.total_leisure ?? null,
+        totalStress: result.total_stress ?? null,
+        status: result.status || "Unknown",
+        message: result.message || null,
+        warnings: result.warnings || null,
+        filteredTasksInfo: result.filtered_tasks_info || null, // Store filtered info
+      });
+
+      // Set general error only if overall status indicates failure beyond just filtering
+      if (
+        result.status &&
+        ![
+          "Optimal",
+          "Suboptimal",
+          "Time Limit Reached",
+          "Feasible",
+          "No Schedulable Tasks",
+        ].includes(result.status)
+      ) {
+        setError(
           result.message ||
-          `Optimization failed with status: ${result.status || "Unknown"}`;
-        setError(failureMessage);
-        setOptimizationResult({
-          totalLeisure: null,
-          totalStress: null,
-          status: result.status || "Error",
-          message: failureMessage,
-          warnings: result.warnings || null,
-        });
+            `Optimization finished with status: ${result.status}`,
+        );
       }
     } catch (err) {
       console.error("Optimization failed:", err);
@@ -461,6 +514,7 @@ function App() {
         status: "Error",
         message: errorMessage,
         warnings: null,
+        filteredTasksInfo: null,
       });
     } finally {
       setIsLoading(false);
@@ -480,6 +534,7 @@ function App() {
       status: null,
       message: null,
       warnings: null,
+      filteredTasksInfo: null,
     });
   };
 
@@ -499,7 +554,7 @@ function App() {
       }
 
       const isNumeric =
-        ["priority", "duration", "deadline"].includes(name) &&
+        ["priority", "difficulty", "duration", "deadline"].includes(name) &&
         type !== "select" &&
         name !== "deadlineDate";
 
@@ -548,46 +603,58 @@ function App() {
   // --- Add/Edit Submit Handlers ---
 
   const processTaskData = (taskData: TaskFormData): Omit<Task, "id"> | null => {
-    setError(null);
+    // Use form-specific error state for modals
+    setError(null); // Clear modal error state at the beginning
+    let modalError: string | null = null;
 
     let deadlineValue: string | number;
     if (taskData.deadlineType === "date") {
       const datePart = taskData.deadlineDate;
       if (!datePart || datePart.length !== 10) {
-        setError("Invalid deadline date format selected. Use YYYY-MM-DD.");
-        return null;
-      }
-      deadlineValue = `${datePart}T23:59:59`;
-      const parsedDeadline = parseLocalISO(deadlineValue);
-      if (!parsedDeadline || parsedDeadline < startOfDay(new Date())) {
-        setError("Deadline date cannot be in the past.");
-        return null;
+        modalError = "Invalid deadline date format. Use YYYY-MM-DD.";
+      } else {
+        deadlineValue = `${datePart}T23:59:59`; // Set to end of day
+        const parsedDeadline = parseLocalISO(deadlineValue);
+        if (!parsedDeadline || parsedDeadline < startOfDay(new Date())) {
+          modalError = "Deadline date cannot be in the past.";
+        }
       }
     } else {
-      const days = parseInt(taskData.deadline.toString());
+      const days = parseInt(String(taskData.deadline), 10);
       if (isNaN(days) || days < 0) {
-        setError("Deadline days must be a non-negative number.");
-        return null;
+        modalError = "Deadline days must be a non-negative number.";
+      } else {
+        deadlineValue = days;
       }
-      deadlineValue = days;
     }
 
     if (!taskData.name.trim()) {
-      setError("Task name cannot be empty.");
-      return null;
+      modalError = "Task name cannot be empty.";
     }
-    const duration = parseInt(taskData.duration.toString());
+    const duration = parseInt(String(taskData.duration), 10);
     if (isNaN(duration) || duration <= 0) {
-      setError("Task duration must be a positive number.");
+      modalError = "Task duration must be a positive number.";
+    }
+    const priority = parseInt(String(taskData.priority), 10);
+    if (isNaN(priority) || priority < 1 || priority > 5) {
+      modalError = "Priority must be between 1 and 5.";
+    }
+    const difficulty = parseInt(String(taskData.difficulty), 10);
+    if (isNaN(difficulty) || difficulty < 1 || difficulty > 5) {
+      modalError = "Difficulty must be between 1 and 5.";
+    }
+
+    if (modalError) {
+      setError(modalError); // Set the error state to display in the modal
       return null;
     }
 
     return {
       name: taskData.name.trim(),
-      priority: taskData.priority || 1,
-      difficulty: taskData.difficulty || 1,
+      priority: priority || 1,
+      difficulty: difficulty || 1, // Ensure difficulty is included
       duration: duration,
-      deadline: deadlineValue,
+      deadline: deadlineValue!,
       preference: taskData.preference,
     };
   };
@@ -595,7 +662,9 @@ function App() {
   const processBlockData = (
     blockData: BlockFormData,
   ): Omit<BlockedInterval, "id"> | null => {
+    // Use form-specific error state for modals
     setError(null);
+    let modalError: string | null = null;
 
     const startDT = parse(
       `${blockData.date} ${blockData.startTime}`,
@@ -609,18 +678,16 @@ function App() {
     );
 
     if (!isValid(startDT) || !isValid(endDT)) {
-      setError(
-        "Invalid date or time format for blocked interval. Use YYYY-MM-DD and HH:MM.",
-      );
-      return null;
-    }
-
-    if (endDT <= startDT) {
-      setError("End time must be after start time for the blocked interval.");
-      return null;
+      modalError = "Invalid date or time format. Use YYYY-MM-DD and HH:MM.";
+    } else if (endDT <= startDT) {
+      modalError = "End time must be after start time.";
     }
     if (!blockData.activity.trim()) {
-      setError("Blocked interval activity name cannot be empty.");
+      modalError = "Activity name cannot be empty.";
+    }
+
+    if (modalError) {
+      setError(modalError);
       return null;
     }
 
@@ -653,9 +720,22 @@ function App() {
     if (processedData) {
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
-          task.id === editingTask.id ? { ...task, ...processedData } : task,
+          task.id === editingTask.id
+            ? {
+                ...task,
+                ...processedData,
+                difficulty: processedData.difficulty ?? task.difficulty,
+              } // Ensure difficulty updates
+            : task,
         ),
       );
+      // Clear this specific task from filtered list if it was edited successfully
+      setOptimizationResult((prev) => ({
+        ...prev,
+        filteredTasksInfo:
+          prev.filteredTasksInfo?.filter((t) => t.id !== editingTask.id) ||
+          null,
+      }));
       closeAndResetEditTaskForm();
     }
   };
@@ -692,6 +772,12 @@ function App() {
   // --- Delete Handlers ---
   const handleDeleteTask = (taskId: string) => {
     setTasks((prev) => prev.filter((task) => task.id !== taskId));
+    // Also remove from filtered list if present
+    setOptimizationResult((prev) => ({
+      ...prev,
+      filteredTasksInfo:
+        prev.filteredTasksInfo?.filter((t) => t.id !== taskId) || null,
+    }));
   };
 
   const handleDeleteBlock = (blockId: string) => {
@@ -701,10 +787,55 @@ function App() {
   // --- Edit Click Handlers ---
   const handleEditTaskClick = (task: Task) => {
     setEditingTask(task);
+    // Reset hint, it will be set by handleEditFilteredTask if needed
+    setEditTaskMinDurationHint(null);
   };
 
   const handleEditBlockClick = (block: BlockedInterval) => {
     setEditingBlock(block);
+  };
+
+  // --- NEW: Edit Click Handler for Filtered Tasks ---
+  const handleEditFilteredTask = (filteredTaskInfo: FilteredTaskInfo) => {
+    const originalTask = getTaskById(filteredTaskInfo.id);
+    if (originalTask) {
+      setEditingTask(originalTask); // Trigger the edit form population
+      // Set the duration hint based on the filtered info
+      setEditTaskMinDurationHint(filteredTaskInfo.required_duration_min);
+    } else {
+      console.error(
+        "Could not find original task for filtered task:",
+        filteredTaskInfo,
+      );
+      setError(
+        `Could not find original task data for '${filteredTaskInfo.name}'.`,
+      );
+    }
+  };
+
+  // --- NEW: Auto Adjust Duration Handler ---
+  const handleAutoAdjustDuration = (filteredTaskInfo: FilteredTaskInfo) => {
+    if (filteredTaskInfo.required_duration_min === null) return; // Should not happen if button is shown
+
+    setTasks((prevTasks) =>
+      prevTasks.map((task) =>
+        task.id === filteredTaskInfo.id
+          ? { ...task, duration: filteredTaskInfo.required_duration_min! } // Update duration
+          : task,
+      ),
+    );
+
+    // Remove this task from the filtered list as it's now adjusted
+    setOptimizationResult((prev) => ({
+      ...prev,
+      filteredTasksInfo:
+        prev.filteredTasksInfo?.filter((t) => t.id !== filteredTaskInfo.id) ||
+        null,
+    }));
+
+    console.log(
+      `Auto-adjusted duration for task '${filteredTaskInfo.name}' to ${filteredTaskInfo.required_duration_min} minutes.`,
+    );
   };
 
   // --- Event Click Handler ---
@@ -775,17 +906,18 @@ function App() {
             className="bg-gray-700 rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-purple-400 appearance-none cursor-pointer border border-gray-600"
           >
             {Array.from({ length: 24 }, (_, i) => i + 1).map((hour) => (
-              <option key={hour} value={hour} disabled={hour <= startHour}>
-                {`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}
-              </option>
+              <option
+                key={hour}
+                value={hour}
+                disabled={hour <= startHour}
+              >{`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}</option>
             ))}
           </select>
         </div>
       </div>
       <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
-        <Info size={12} />
-        Note: Backend currently uses 8am-10pm (22:00) internally. These settings
-        are preferences for future enhancement.
+        <Info size={12} /> Note: Backend currently uses 8am-10pm (22:00)
+        internally.
       </p>
     </div>
   );
@@ -805,7 +937,7 @@ function App() {
             <Loader2 className="w-5 h-5 animate-spin" />
           ) : (
             <Wand2 className="w-5 h-5" />
-          )}
+          )}{" "}
           Auto-generate Sample
         </button>
         <button
@@ -813,21 +945,23 @@ function App() {
           disabled={isLoading}
           className="flex-1 max-w-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors duration-150 text-base font-medium"
         >
-          <Plus className="w-5 h-5" />
-          Start Manually
+          <Plus className="w-5 h-5" /> Start Manually
         </button>
       </div>
     </div>
   );
 
+  // --- Render Task Form Fields with Hint ---
   const TaskFormFields: React.FC<{
     formData: TaskFormData;
     onChange: (
       e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
     ) => void;
     formIdPrefix: string;
-  }> = ({ formData, onChange, formIdPrefix }) => (
+    minDurationHint?: number | null; // Add optional hint prop
+  }> = ({ formData, onChange, formIdPrefix, minDurationHint }) => (
     <>
+      {/* Task Name */}
       <div>
         <label
           htmlFor={`${formIdPrefix}TaskName`}
@@ -845,13 +979,14 @@ function App() {
           className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
         />
       </div>
+      {/* Priority & Difficulty */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label
             htmlFor={`${formIdPrefix}TaskPriority`}
             className="block text-sm font-medium text-gray-300 mb-1"
           >
-            Priority (1=Low, 5=High)
+            Priority (1-5)
           </label>
           <input
             id={`${formIdPrefix}TaskPriority`}
@@ -870,7 +1005,7 @@ function App() {
             htmlFor={`${formIdPrefix}TaskDifficulty`}
             className="block text-sm font-medium text-gray-300 mb-1"
           >
-            Difficulty (1=Easy, 5=Hard)
+            Difficulty (1-5)
           </label>
           <input
             id={`${formIdPrefix}TaskDifficulty`}
@@ -885,6 +1020,7 @@ function App() {
           />
         </div>
       </div>
+      {/* Duration with Hint */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label
@@ -902,10 +1038,37 @@ function App() {
             value={formData.duration}
             onChange={onChange}
             required
-            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            className={`w-full bg-gray-700 rounded px-3 py-2 border ${minDurationHint && formData.duration < minDurationHint ? "border-yellow-500" : "border-gray-600"} focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent`}
           />
+          {minDurationHint && (
+            <p className="text-xs text-yellow-400 mt-1 flex items-center gap-1">
+              <HelpCircle size={14} /> Suggestion: Minimum {minDurationHint}{" "}
+              minutes needed for scheduling.
+            </p>
+          )}
+        </div>
+        <div>
+          <label
+            htmlFor={`${formIdPrefix}TaskPreference`}
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Time Preference
+          </label>
+          <select
+            id={`${formIdPrefix}TaskPreference`}
+            name="preference"
+            value={formData.preference}
+            onChange={onChange}
+            className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none cursor-pointer"
+          >
+            <option value="any">Any Time</option>
+            <option value="morning">Morning (8am - 12pm)</option>
+            <option value="afternoon">Afternoon (12pm - 4pm)</option>
+            <option value="evening">Evening (4pm - 10pm)</option>
+          </select>
         </div>
       </div>
+      {/* Deadline */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
           Deadline
@@ -919,8 +1082,8 @@ function App() {
               checked={formData.deadlineType === "days"}
               onChange={onChange}
               className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
-            />
-            Relative (Days from now)
+            />{" "}
+            Relative (Days)
           </label>
           <label className="flex items-center gap-2 cursor-pointer text-sm">
             <input
@@ -930,7 +1093,7 @@ function App() {
               checked={formData.deadlineType === "date"}
               onChange={onChange}
               className="form-radio h-4 w-4 text-purple-500 bg-gray-600 border-gray-500 focus:ring-purple-500 focus:ring-offset-gray-800"
-            />
+            />{" "}
             Specific Date
           </label>
         </div>
@@ -958,27 +1121,6 @@ function App() {
             />
           )}
         </div>
-      </div>
-
-      <div>
-        <label
-          htmlFor={`${formIdPrefix}TaskPreference`}
-          className="block text-sm font-medium text-gray-300 mb-1"
-        >
-          Time Preference
-        </label>
-        <select
-          id={`${formIdPrefix}TaskPreference`}
-          name="preference"
-          value={formData.preference}
-          onChange={onChange}
-          className="w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none cursor-pointer"
-        >
-          <option value="any">Any Time</option>
-          <option value="morning">Morning (8am - 12pm)</option>
-          <option value="afternoon">Afternoon (12pm - 4pm)</option>
-          <option value="evening">Evening (4pm - 10pm)</option>
-        </select>
       </div>
     </>
   );
@@ -1068,13 +1210,14 @@ function App() {
     </>
   );
 
+  // --- Modal Rendering ---
   const renderModalWrapper = (
     title: string,
     onClose: () => void,
     onSubmit: (e: React.FormEvent) => void,
     submitText: string,
     children: React.ReactNode,
-    currentError: string | null,
+    currentError: string | null, // Use modal-specific error
   ) => (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-gray-800 p-6 rounded-xl w-full max-w-lg shadow-2xl border border-gray-700 max-h-[90vh] overflow-y-auto">
@@ -1089,7 +1232,7 @@ function App() {
         </div>
         <form onSubmit={onSubmit} className="space-y-4 pb-2">
           {children}
-          {currentError && (
+          {currentError && ( // Display modal error here
             <div className="bg-red-900 border border-red-700 text-red-300 px-3 py-2 rounded text-sm mt-2">
               {currentError}
             </div>
@@ -1122,7 +1265,6 @@ function App() {
       />,
       error,
     );
-
   const renderEditTaskForm = () =>
     editTaskData &&
     renderModalWrapper(
@@ -1134,10 +1276,10 @@ function App() {
         formData={editTaskData}
         onChange={(e) => handleTaskFormChange(e, "edit")}
         formIdPrefix="edit"
+        minDurationHint={editTaskMinDurationHint}
       />,
       error,
-    );
-
+    ); // Pass hint
   const renderNewBlockForm = () =>
     renderModalWrapper(
       "Add Blocked Time",
@@ -1155,7 +1297,6 @@ function App() {
       />,
       error,
     );
-
   const renderEditBlockForm = () =>
     editBlockData &&
     renderModalWrapper(
@@ -1171,11 +1312,12 @@ function App() {
       error,
     );
 
+  // --- Render Tasks List ---
   const renderTasks = () => (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
         <h2 className="text-xl font-semibold flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />
+          <AlertCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />{" "}
           Tasks ({tasks.length})
         </h2>
         <div className="flex gap-2 flex-wrap">
@@ -1185,8 +1327,7 @@ function App() {
               disabled={isLoading}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
             >
-              <Plus className="w-4 h-4" />
-              Add Task
+              <Plus className="w-4 h-4" /> Add Task
             </button>
           )}
           <button
@@ -1198,14 +1339,57 @@ function App() {
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Sparkles className="w-4 h-4" />
-            )}
+            )}{" "}
             Optimize
           </button>
         </div>
       </div>
-      {tasks.length === 0 && (
+      {/* Display Filtered Task Info */}
+      {optimizationResult.filteredTasksInfo &&
+        optimizationResult.filteredTasksInfo.length > 0 && (
+          <div className="mb-4 p-3 rounded-lg bg-yellow-900 border border-yellow-700 text-yellow-200">
+            <p className="font-semibold mb-2 text-yellow-100 flex items-center gap-2">
+              <HelpCircle size={18} /> Some tasks require more time to meet the
+              scheduling criteria:
+            </p>
+            <ul className="space-y-2 list-none">
+              {optimizationResult.filteredTasksInfo.map((filteredTask) => (
+                <li
+                  key={filteredTask.id}
+                  className="flex justify-between items-center text-sm gap-2 flex-wrap"
+                >
+                  <span className="flex-1 min-w-[200px]">
+                    <span className="font-medium">{filteredTask.name}</span>
+                    <span className="text-xs opacity-80 block">
+                      {filteredTask.reason}
+                    </span>
+                  </span>
+                  {/* --- Actions for Filtered Tasks --- */}
+                  {filteredTask.required_duration_min !== null && (
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => handleAutoAdjustDuration(filteredTask)}
+                        className="text-xs bg-green-700 hover:bg-green-600 text-green-100 py-1 px-2 rounded transition-colors flex items-center gap-1"
+                        title={`Set duration to ${filteredTask.required_duration_min} min`}
+                      >
+                        <CheckCircle size={12} /> Adjust
+                      </button>
+                      <button
+                        onClick={() => handleEditFilteredTask(filteredTask)}
+                        className="text-xs bg-yellow-700 hover:bg-yellow-600 text-yellow-100 py-1 px-2 rounded transition-colors flex items-center gap-1"
+                      >
+                        <Edit size={12} /> Edit
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      {tasks.length === 0 && !isLoading && (
         <p className="text-gray-400 text-center py-4 italic">
-          No tasks added yet. Add tasks manually or use auto-generate.
+          No tasks added yet.
         </p>
       )}
       <div className="overflow-x-auto max-h-96">
@@ -1214,6 +1398,7 @@ function App() {
             <tr className="text-left text-sm text-gray-400">
               <th className="pb-2 px-3 font-medium">Name</th>
               <th className="pb-2 px-3 font-medium text-center">Prio</th>
+              <th className="pb-2 px-3 font-medium text-center">Diff</th>
               <th className="pb-2 px-3 font-medium text-center">Dur</th>
               <th className="pb-2 px-3 font-medium">Deadline</th>
               <th className="pb-2 px-3 font-medium">Pref</th>
@@ -1230,6 +1415,7 @@ function App() {
               >
                 <td className="py-2.5 px-3 rounded-l-lg">{task.name}</td>
                 <td className="py-2.5 px-3 text-center">{task.priority}</td>
+                <td className="py-2.5 px-3 text-center">{task.difficulty}</td>
                 <td className="py-2.5 px-3 text-center">
                   {task.duration}
                   <span className="text-xs text-gray-400">m</span>
@@ -1270,21 +1456,20 @@ function App() {
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
         <h2 className="text-xl font-semibold flex items-center gap-2">
-          <Clock className="w-5 h-5 text-purple-400 flex-shrink-0" />
-          Blocked Times ({blockedIntervals.length})
+          <Clock className="w-5 h-5 text-purple-400 flex-shrink-0" /> Blocked
+          Times ({blockedIntervals.length})
         </h2>
         <button
           onClick={() => setShowNewBlockForm(true)}
           disabled={isLoading}
           className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
         >
-          <Plus className="w-4 h-4" />
-          Add Block
+          <Plus className="w-4 h-4" /> Add Block
         </button>
       </div>
       {blockedIntervals.length === 0 && (
         <p className="text-gray-400 text-center py-4 italic">
-          No blocked times added yet. Add classes, appointments, etc.
+          No blocked times added yet.
         </p>
       )}
       <div className="overflow-x-auto max-h-96">
@@ -1301,11 +1486,11 @@ function App() {
           </thead>
           <tbody>
             {blockedIntervals
-              .sort((a, b) => {
-                const timeA = parseLocalISO(a.startTime)?.getTime() || 0;
-                const timeB = parseLocalISO(b.startTime)?.getTime() || 0;
-                return timeA - timeB;
-              })
+              .sort(
+                (a, b) =>
+                  (parseLocalISO(a.startTime)?.getTime() || 0) -
+                  (parseLocalISO(b.startTime)?.getTime() || 0),
+              )
               .map((interval) => (
                 <tr
                   key={interval.id}
@@ -1362,20 +1547,14 @@ function App() {
   ) => {
     const start = parseLocalISO(startTimeStr);
     const end = parseLocalISO(endTimeStr);
-
     if (!start || !end || end <= start) {
-      console.warn(
-        `Invalid date range for event: ${title} (ID: ${eventId}), Start: ${startTimeStr}, End: ${endTimeStr}. Skipping render.`,
-      );
+      console.warn(`Invalid date range for event: ${title} (ID: ${eventId})`);
       return null;
     }
-
     const dayViewStartHour = GRID_START_HOUR;
     const dayViewEndHour = GRID_END_HOUR;
     const totalDayViewMinutes = (dayViewEndHour - dayViewStartHour) * 60;
-
     if (totalDayViewMinutes <= 0) return null;
-
     const startMinutesOffset = Math.max(
       0,
       start.getHours() * 60 + start.getMinutes() - dayViewStartHour * 60,
@@ -1384,16 +1563,10 @@ function App() {
       totalDayViewMinutes,
       end.getHours() * 60 + end.getMinutes() - dayViewStartHour * 60,
     );
-
     const durationMinutesInView = endMinutesOffset - startMinutesOffset;
-
-    if (durationMinutesInView <= 0) {
-      return null;
-    }
-
+    if (durationMinutesInView <= 0) return null;
     const topPercent = (startMinutesOffset / totalDayViewMinutes) * 100;
     const heightPercent = (durationMinutesInView / totalDayViewMinutes) * 100;
-
     let bgColor =
       type === "task"
         ? "bg-purple-600 border-purple-400"
@@ -1437,8 +1610,8 @@ function App() {
       <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow-lg overflow-hidden mt-6">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
           <h2 className="text-xl font-semibold flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-purple-400" />
-            Optimized Weekly Schedule
+            <Calendar className="w-5 h-5 text-purple-400" /> Optimized Weekly
+            Schedule
           </h2>
           <div className="flex gap-2 items-center bg-gray-700 p-1 rounded-lg">
             <button
@@ -1462,13 +1635,22 @@ function App() {
           </div>
         </div>
 
-        {isOptimized && optimizationResult.status && (
+        {/* Display Optimization Status/Messages */}
+        {optimizationResult.status && (
           <div
             className={`mb-4 p-3 rounded-lg text-sm border ${
-              optimizationResult.status === "Optimal" ||
-              optimizationResult.status === "Feasible"
+              [
+                "Optimal",
+                "Feasible",
+                "Suboptimal",
+                "Time Limit Reached",
+              ].includes(optimizationResult.status) && isOptimized
                 ? "bg-green-900 border-green-700 text-green-200"
-                : "bg-yellow-900 border-yellow-700 text-yellow-200"
+                : ["Infeasible", "Error", "No Schedulable Tasks"].includes(
+                      optimizationResult.status,
+                    )
+                  ? "bg-red-900 border-red-700 text-red-200"
+                  : "bg-gray-700 border-gray-600 text-gray-300" // Default/other statuses
             }`}
           >
             <p className="flex items-center gap-1.5">
@@ -1485,14 +1667,12 @@ function App() {
                 </span>
               )}
             </p>
-
-            {optimizationResult.message &&
-              !optimizationResult.message.toLowerCase().includes("success") && (
-                <p className="mt-1 text-xs opacity-90">
-                  <span className="font-semibold">Solver Message:</span>{" "}
-                  {optimizationResult.message}
-                </p>
-              )}
+            {optimizationResult.message && (
+              <p className="mt-1 text-xs opacity-90">
+                <span className="font-semibold">Message:</span>{" "}
+                {optimizationResult.message}
+              </p>
+            )}
             {optimizationResult.warnings &&
               optimizationResult.warnings.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-opacity-30 border-current">
@@ -1506,23 +1686,18 @@ function App() {
               )}
           </div>
         )}
-        {error &&
-          optimizationResult.status &&
-          ["Error", "Infeasible", "Not Solved"].includes(
-            optimizationResult.status,
-          ) && (
-            <div className="mb-4 p-3 rounded-lg text-sm bg-red-900 border border-red-700 text-red-200">
-              <p>
-                <strong className="font-semibold">
-                  {optimizationResult.status || "Error"}:
-                </strong>{" "}
-                {error || optimizationResult.message}
-              </p>
-            </div>
-          )}
+        {/* Display general error if not handled by optimization status */}
+        {error && !optimizationResult.status && (
+          <div className="mb-4 p-3 rounded-lg text-sm bg-red-900 border border-red-700 text-red-200">
+            <p>
+              <strong className="font-semibold">Error:</strong> {error}
+            </p>
+          </div>
+        )}
 
         <div className="overflow-x-auto relative">
           <div className="grid grid-cols-[45px_repeat(7,minmax(110px,1fr))] min-w-[800px]">
+            {/* Calendar Headers and Grid Lines */}
             <div className="sticky top-0 z-30 bg-gray-800 h-14 border-b border-r border-gray-700"></div>
             {days.map((day) => (
               <div
@@ -1542,9 +1717,7 @@ function App() {
                 <div
                   key={`time-${hour}`}
                   className="h-12 pr-2 text-right text-[10px] text-gray-500 border-r border-gray-700 flex items-center justify-end"
-                >
-                  {`${hour.toString().padStart(2, "0")}:00`}
-                </div>
+                >{`${hour.toString().padStart(2, "0")}:00`}</div>
               ))}
             </div>
             {days.map((day, dayIndex) => (
@@ -1560,6 +1733,7 @@ function App() {
                   ></div>
                 ))}
                 <div className="absolute inset-0 top-0 left-0 right-0 bottom-0 pointer-events-none">
+                  {/* Render Blocked Intervals */}
                   {blockedIntervals
                     .filter((interval) => {
                       const start = parseLocalISO(interval.startTime);
@@ -1575,6 +1749,7 @@ function App() {
                         () => handleEventClick(interval),
                       ),
                     )}
+                  {/* Render Scheduled Tasks */}
                   {isOptimized &&
                     optimizedSchedule[format(day, "yyyy-MM-dd")]?.map(
                       (scheduled) =>
@@ -1594,12 +1769,10 @@ function App() {
         </div>
       </div>
     );
-  }; // End renderCalendar
+  };
 
-  // --- Event Details Modal ---
   const renderEventDetailsModal = () => {
     if (!showEventDetailsModal || !selectedEvent) return null;
-
     const isTask = "priority" in selectedEvent;
     const title = isTask ? selectedEvent.name : selectedEvent.activity;
     const startTime = parseLocalISO(selectedEvent.startTime);
@@ -1653,7 +1826,7 @@ function App() {
                   <strong className="font-medium text-gray-300 w-24 inline-block">
                     Duration:
                   </strong>{" "}
-                  {selectedEvent.duration_min} min
+                  {(selectedEvent as ScheduledTaskItem).duration_min} min
                 </p>
                 <p>
                   <strong className="font-medium text-gray-300 w-24 inline-block">
@@ -1697,20 +1870,14 @@ function App() {
           </h1>
         </header>
 
+        {/* General Error Display */}
         {error &&
           !showNewBlockForm &&
           !showNewTaskForm &&
           !showEditBlockForm &&
-          !showEditTaskForm &&
-          !(
-            optimizationResult.status &&
-            ["Error", "Infeasible", "Not Solved"].includes(
-              optimizationResult.status,
-            )
-          ) && (
+          !showEditTaskForm && (
             <div className="mb-4 p-3 rounded-lg text-sm bg-red-900 border border-red-700 flex justify-between items-center">
               <span className="flex items-center gap-2">
-                {" "}
                 <AlertCircle size={16} /> {error}
               </span>
               <button
@@ -1722,6 +1889,7 @@ function App() {
             </div>
           )}
 
+        {/* Mode Selection or Loading */}
         {!mode && !isLoading && renderModeSelection()}
         {isLoading && !mode && (
           <div className="flex justify-center items-center h-60 bg-gray-800 rounded-xl">
@@ -1729,6 +1897,7 @@ function App() {
           </div>
         )}
 
+        {/* Main Content Area */}
         {mode && (
           <>
             {renderTimeWindow()}
@@ -1737,15 +1906,13 @@ function App() {
               {renderBlockedIntervals()}
             </div>
             {renderCalendar()}
-
-            {/* --- Add the Scheduled Tasks List Here --- */}
             {isOptimized && Object.keys(optimizedSchedule).length > 0 && (
               <ScheduledTasksList schedule={optimizedSchedule} />
             )}
-            {/* ----------------------------------------- */}
           </>
         )}
 
+        {/* Modals */}
         {showNewTaskForm && renderNewTaskForm()}
         {showNewBlockForm && renderNewBlockForm()}
         {showEditTaskForm && renderEditTaskForm()}
@@ -1753,7 +1920,7 @@ function App() {
         {renderEventDetailsModal()}
       </div>
       <footer className="text-center text-xs text-gray-500 mt-12 pb-4">
-        IntelliSchedule v1.2 - React + Flask + PuLP
+        IntelliSchedule v1.4 - React + Flask + Gurobi
       </footer>
     </div>
   );
