@@ -1,5 +1,11 @@
 import React from "react";
-import { Clock, Plus, Edit, Trash2 } from "lucide-react"; // Add UploadCloud if needed, or keep separate button
+import {
+  Clock,
+  Plus,
+  Edit,
+  Trash2,
+  Wand2, // Icon for auto-generate
+} from "lucide-react";
 import { BlockedInterval } from "../types";
 import { parseLocalISO } from "../utils/dateUtils"; // Ensure this is imported
 import { format } from "date-fns";
@@ -11,7 +17,7 @@ interface BlockedIntervalsListProps {
   onAddBlock: () => void;
   onEditBlock: (block: BlockedInterval) => void;
   onDeleteBlock: (blockId: string) => void;
-  // No need to add onImportSchedule here, keep it in App.tsx
+  onGenerateBlocks: () => void; // <-- ADD Prop
 }
 
 const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
@@ -20,6 +26,7 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
   onAddBlock,
   onEditBlock,
   onDeleteBlock,
+  onGenerateBlocks, // <-- ADD Prop
 }) => {
   // Sort intervals for consistent display
   const sortedIntervals = useMemo(() => {
@@ -37,18 +44,30 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
           <Clock className="w-5 h-5 text-purple-400 flex-shrink-0" /> Blocked
           Times ({blockedIntervals.length})
         </h2>
-        {/* Keep Add button separate */}
-        <button
-          onClick={onAddBlock}
-          disabled={isLoading}
-          className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> Add Manually
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          {" "}
+          {/* Add flex-wrap */}
+          <button
+            onClick={onGenerateBlocks} // <-- Use the new handler
+            disabled={isLoading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
+            title="Replace current blocked times with a sample set (classes, meals etc.)"
+          >
+            <Wand2 className="w-4 h-4" /> Generate Sample
+          </button>
+          <button
+            onClick={onAddBlock}
+            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Manually
+          </button>
+        </div>
       </div>
       {sortedIntervals.length === 0 && (
         <p className="text-gray-400 text-center py-4 italic">
-          No blocked times added yet. Add manually or import schedule.
+          No blocked times added yet. Add manually, import schedule, or generate
+          a sample.
         </p>
       )}
       <div className="overflow-x-auto max-h-96 custom-scrollbar">
