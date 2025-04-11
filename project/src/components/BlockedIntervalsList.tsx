@@ -31,7 +31,7 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
           disabled={isLoading}
           className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
         >
-          <Plus className="w-4 h-4" /> Add Block
+          <Plus className="w-4 h-4" /> Add
         </button>
       </div>
       {blockedIntervals.length === 0 && (
@@ -39,16 +39,16 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
           No blocked times added yet.
         </p>
       )}
-      <div className="overflow-x-auto max-h-96">
+      <div className="overflow-x-auto max-h-96 custom-scrollbar">
         <table className="w-full min-w-[600px] border-separate border-spacing-y-1">
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
-              <th className="pb-2 px-3 font-medium">Activity</th>
-              <th className="pb-2 px-3 font-medium">Start Time</th>
-              <th className="pb-2 px-3 font-medium">End Time</th>
               <th className="pb-2 px-1 font-medium text-center w-20">
                 Actions
               </th>
+              <th className="pb-2 px-3 font-medium">Activity</th>
+              <th className="pb-2 px-3 font-medium">Start Time</th>
+              <th className="pb-2 px-3 font-medium">End Time</th>
             </tr>
           </thead>
           <tbody>
@@ -56,28 +56,13 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
               .sort(
                 (a, b) =>
                   (parseLocalISO(a.startTime)?.getTime() || 0) -
-                  (parseLocalISO(b.startTime)?.getTime() || 0)
+                  (parseLocalISO(b.startTime)?.getTime() || 0),
               )
               .map((interval) => (
                 <tr
                   key={interval.id}
                   className="bg-gray-750 hover:bg-gray-700 transition-colors rounded-lg"
                 >
-                  <td className="py-2.5 px-3 rounded-l-lg">
-                    {interval.activity}
-                  </td>
-                  <td className="py-2.5 px-3 text-sm">
-                    {format(
-                      parseLocalISO(interval.startTime) || new Date(),
-                      "MMM dd, HH:mm"
-                    )}
-                  </td>
-                  <td className="py-2.5 px-3 text-sm">
-                    {format(
-                      parseLocalISO(interval.endTime) || new Date(),
-                      "HH:mm"
-                    )}
-                  </td>
                   <td className="py-2.5 px-1 text-center rounded-r-lg">
                     <div className="flex justify-center items-center gap-1.5">
                       <button
@@ -95,6 +80,21 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
                         <Trash2 size={16} />
                       </button>
                     </div>
+                  </td>
+                  <td className="py-2.5 px-3 rounded-l-lg">
+                    {interval.activity}
+                  </td>
+                  <td className="py-2.5 px-3 text-sm">
+                    {format(
+                      parseLocalISO(interval.startTime) || new Date(),
+                      "MMM dd, HH:mm",
+                    )}
+                  </td>
+                  <td className="py-2.5 px-3 text-sm">
+                    {format(
+                      parseLocalISO(interval.endTime) || new Date(),
+                      "HH:mm",
+                    )}
                   </td>
                 </tr>
               ))}

@@ -205,8 +205,8 @@ const CalendarComponent: React.FC<CalendarProps> = ({
         </div>
       )}
       
-      <div className="overflow-x-auto relative">
-        <div className="grid grid-cols-[45px_repeat(7,minmax(110px,1fr))] min-w-[800px]">
+      <div className="overflow-x-auto relative w-full custom-scrollbar">
+        <div className="grid grid-cols-[45px_repeat(7,1fr)] min-w-[800px] w-full">
           {/* Calendar Headers and Grid Lines */}
           <div className="sticky top-0 z-30 bg-gray-800 h-14 border-b border-r border-gray-700"></div>
           {days.map((day) => (

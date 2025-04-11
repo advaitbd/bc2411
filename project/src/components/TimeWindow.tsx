@@ -20,8 +20,8 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
         <Settings className="w-5 h-5 text-purple-400" />
         Scheduling Window Preference
       </h2>
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
+      <div className="flex flex-col md:flex-row gap-6">
+        <div className="flex-1 max-w-xs">
           <label htmlFor="startHour" className="block text-sm text-gray-400 mb-2">
             Start Hour (00:00 - 23:00)
           </label>
@@ -39,7 +39,7 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
             ))}
           </select>
         </div>
-        <div className="flex-1">
+        <div className="flex-1 max-w-xs">
           <label htmlFor="endHour" className="block text-sm text-gray-400 mb-2">
             End Hour (01:00 - 24:00)
           </label>
@@ -60,10 +60,12 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
             ))}
           </select>
         </div>
+        <div className="flex-1 flex items-end">
+          <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+            <Info size={12} /> Note: Backend currently uses 8am-10pm (22:00) internally.
+          </p>
+        </div>
       </div>
-      <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
-        <Info size={12} /> Note: Backend currently uses 8am-10pm (22:00) internally.
-      </p>
     </div>
   );
 };

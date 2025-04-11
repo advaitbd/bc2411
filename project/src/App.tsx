@@ -16,8 +16,11 @@ import TimeWindow from "./components/TimeWindow";
 import TasksList from "./components/TasksList";
 import BlockedIntervalsList from "./components/BlockedIntervalsList";
 import CalendarComponent from "./components/Calendar";
-import TaskFormFields, { processTaskData } from "./components/TaskForm";
+import TaskFormFields from "./components/TaskForm";
 import BlockFormFields, { processBlockData } from "./components/BlockForm";
+
+// Import utilities
+import { processTaskData } from "./utils/formUtils";
 import Modal from "./components/Modal";
 import EventDetailsModal from "./components/EventDetailsModal";
 import ScheduledTasksList from "./ScheduledTasksList";
@@ -35,6 +38,9 @@ import {
 } from "./types";
 import { parseLocalISO } from "./utils/dateUtils";
 import { API_BASE_URL } from "./utils/constants";
+
+// Import custom CSS
+import "./utils/scrollbar.css";
 
 function App() {
   // --- State Hooks ---
@@ -703,7 +709,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-900 text-gray-100 p-4 md:p-8 font-sans">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-screen-2xl mx-auto">
         <header className="flex items-center gap-3 mb-8">
           <Sparkles className="w-8 h-8 text-purple-400 flex-shrink-0" />
           <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-purple-400 to-pink-500 text-transparent bg-clip-text">
@@ -747,9 +753,9 @@ function App() {
 
         {/* Main Content Area */}
         {mode && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column (1/3) */}
-            <div className="lg:col-span-1 space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+            {/* Left Column (1/4) */}
+            <div className="xl:col-span-1 space-y-6">
               <TimeWindow
                 startHour={startHour}
                 endHour={endHour}
@@ -779,8 +785,8 @@ function App() {
               />
             </div>
 
-            {/* Right Column (2/3) */}
-            <div className="lg:col-span-2">
+            {/* Right Column (3/4) */}
+            <div className="xl:col-span-3">
               <CalendarComponent
                 currentWeekStart={currentWeekStart}
                 setCurrentWeekStart={setCurrentWeekStart}

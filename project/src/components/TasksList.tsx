@@ -1,5 +1,14 @@
 import React from "react";
-import { AlertCircle, Plus, Sparkles, Loader2, Edit, Trash2, HelpCircle, CheckCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Plus,
+  Sparkles,
+  Loader2,
+  Edit,
+  Trash2,
+  HelpCircle,
+  CheckCircle,
+} from "lucide-react";
 import { Task, FilteredTaskInfo } from "../types";
 import { getDeadlineDisplay } from "../utils/dateUtils";
 
@@ -35,14 +44,14 @@ const TasksList: React.FC<TasksListProps> = ({
           <AlertCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />{" "}
           Tasks ({tasks.length})
         </h2>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2">
           {isManualMode && (
             <button
               onClick={onAddTask}
               disabled={isLoading}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
             >
-              <Plus className="w-4 h-4" /> Add Task
+              <Plus className="w-4 h-4" /> Add
             </button>
           )}
           <button
@@ -59,7 +68,7 @@ const TasksList: React.FC<TasksListProps> = ({
           </button>
         </div>
       </div>
-      
+
       {/* Display Filtered Task Info */}
       {filteredTasksInfo && filteredTasksInfo.length > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-yellow-900 border border-yellow-700 text-yellow-200">
@@ -102,26 +111,26 @@ const TasksList: React.FC<TasksListProps> = ({
           </ul>
         </div>
       )}
-      
+
       {tasks.length === 0 && !isLoading && (
         <p className="text-gray-400 text-center py-4 italic">
           No tasks added yet.
         </p>
       )}
-      
-      <div className="overflow-x-auto max-h-96">
+
+      <div className="overflow-x-auto max-h-96 custom-scrollbar">
         <table className="w-full min-w-[700px] border-separate border-spacing-y-1">
           <thead className="sticky top-0 bg-gray-800 z-10">
             <tr className="text-left text-sm text-gray-400">
+              <th className="pb-2 px-1 font-medium text-center w-20">
+                Actions
+              </th>
               <th className="pb-2 px-3 font-medium">Name</th>
               <th className="pb-2 px-3 font-medium text-center">Prio</th>
               <th className="pb-2 px-3 font-medium text-center">Diff</th>
               <th className="pb-2 px-3 font-medium text-center">Dur</th>
               <th className="pb-2 px-3 font-medium">Deadline</th>
               <th className="pb-2 px-3 font-medium">Pref</th>
-              <th className="pb-2 px-1 font-medium text-center w-20">
-                Actions
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -130,19 +139,6 @@ const TasksList: React.FC<TasksListProps> = ({
                 key={task.id}
                 className="bg-gray-750 hover:bg-gray-700 transition-colors rounded-lg"
               >
-                <td className="py-2.5 px-3 rounded-l-lg">{task.name}</td>
-                <td className="py-2.5 px-3 text-center">{task.priority}</td>
-                <td className="py-2.5 px-3 text-center">{task.difficulty}</td>
-                <td className="py-2.5 px-3 text-center">
-                  {task.duration}
-                  <span className="text-xs text-gray-400">m</span>
-                </td>
-                <td className="py-2.5 px-3 text-xs">
-                  {getDeadlineDisplay(task.deadline)}
-                </td>
-                <td className="py-2.5 px-3 capitalize text-xs">
-                  {task.preference}
-                </td>
                 <td className="py-2.5 px-1 text-center rounded-r-lg">
                   <div className="flex justify-center items-center gap-1.5">
                     <button
@@ -160,6 +156,19 @@ const TasksList: React.FC<TasksListProps> = ({
                       <Trash2 size={16} />
                     </button>
                   </div>
+                </td>
+                <td className="py-2.5 px-3 rounded-l-lg">{task.name}</td>
+                <td className="py-2.5 px-3 text-center">{task.priority}</td>
+                <td className="py-2.5 px-3 text-center">{task.difficulty}</td>
+                <td className="py-2.5 px-3 text-center">
+                  {task.duration}
+                  <span className="text-xs text-gray-400">m</span>
+                </td>
+                <td className="py-2.5 px-3 text-xs">
+                  {getDeadlineDisplay(task.deadline)}
+                </td>
+                <td className="py-2.5 px-3 capitalize text-xs">
+                  {task.preference}
                 </td>
               </tr>
             ))}
