@@ -1,8 +1,9 @@
 import React from "react";
-import { Clock, Plus, Edit, Trash2 } from "lucide-react";
+import { Clock, Plus, Edit, Trash2 } from "lucide-react"; // Add UploadCloud if needed, or keep separate button
 import { BlockedInterval } from "../types";
-import { parseLocalISO } from "../utils/dateUtils";
+import { parseLocalISO } from "../utils/dateUtils"; // Ensure this is imported
 import { format } from "date-fns";
+import { useMemo } from "react";
 
 interface BlockedIntervalsListProps {
   blockedIntervals: BlockedInterval[];
@@ -10,6 +11,7 @@ interface BlockedIntervalsListProps {
   onAddBlock: () => void;
   onEditBlock: (block: BlockedInterval) => void;
   onDeleteBlock: (blockId: string) => void;
+  // No need to add onImportSchedule here, keep it in App.tsx
 }
 
 const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
@@ -19,6 +21,15 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
   onEditBlock,
   onDeleteBlock,
 }) => {
+  // Sort intervals for consistent display
+  const sortedIntervals = useMemo(() => {
+    return [...blockedIntervals].sort(
+      (a, b) =>
+        (parseLocalISO(a.startTime)?.getTime() || 0) -
+        (parseLocalISO(b.startTime)?.getTime() || 0),
+    );
+  }, [blockedIntervals]);
+
   return (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
@@ -26,17 +37,18 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
           <Clock className="w-5 h-5 text-purple-400 flex-shrink-0" /> Blocked
           Times ({blockedIntervals.length})
         </h2>
+        {/* Keep Add button separate */}
         <button
           onClick={onAddBlock}
           disabled={isLoading}
           className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
         >
-          <Plus className="w-4 h-4" /> Add
+          <Plus className="w-4 h-4" /> Add Manually
         </button>
       </div>
-      {blockedIntervals.length === 0 && (
+      {sortedIntervals.length === 0 && (
         <p className="text-gray-400 text-center py-4 italic">
-          No blocked times added yet.
+          No blocked times added yet. Add manually or import schedule.
         </p>
       )}
       <div className="overflow-x-auto max-h-96 custom-scrollbar">
@@ -52,52 +64,49 @@ const BlockedIntervalsList: React.FC<BlockedIntervalsListProps> = ({
             </tr>
           </thead>
           <tbody>
-            {blockedIntervals
-              .sort(
-                (a, b) =>
-                  (parseLocalISO(a.startTime)?.getTime() || 0) -
-                  (parseLocalISO(b.startTime)?.getTime() || 0),
-              )
-              .map((interval) => (
-                <tr
-                  key={interval.id}
-                  className="bg-gray-750 hover:bg-gray-700 transition-colors rounded-lg"
-                >
-                  <td className="py-2.5 px-1 text-center rounded-r-lg">
-                    <div className="flex justify-center items-center gap-1.5">
-                      <button
-                        onClick={() => onEditBlock(interval)}
-                        title="Edit Blocked Time"
-                        className="p-1 text-gray-400 hover:text-blue-400 transition-colors rounded-full hover:bg-gray-600"
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        onClick={() => onDeleteBlock(interval.id)}
-                        title="Delete Blocked Time"
-                        className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3 rounded-l-lg">
-                    {interval.activity}
-                  </td>
-                  <td className="py-2.5 px-3 text-sm">
-                    {format(
-                      parseLocalISO(interval.startTime) || new Date(),
-                      "MMM dd, HH:mm",
-                    )}
-                  </td>
-                  <td className="py-2.5 px-3 text-sm">
-                    {format(
-                      parseLocalISO(interval.endTime) || new Date(),
-                      "HH:mm",
-                    )}
-                  </td>
-                </tr>
-              ))}
+            {sortedIntervals.map((interval) => (
+              <tr
+                key={interval.id}
+                className="bg-gray-750 hover:bg-gray-700 transition-colors rounded-lg"
+              >
+                <td className="py-2.5 px-1 text-center rounded-l-lg">
+                  {" "}
+                  {/* Adjusted padding and rounded corner */}
+                  <div className="flex justify-center items-center gap-1.5">
+                    <button
+                      onClick={() => onEditBlock(interval)}
+                      title="Edit Blocked Time"
+                      className="p-1 text-gray-400 hover:text-blue-400 transition-colors rounded-full hover:bg-gray-600"
+                    >
+                      <Edit size={16} />
+                    </button>
+                    <button
+                      onClick={() => onDeleteBlock(interval.id)}
+                      title="Delete Blocked Time"
+                      className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-gray-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </td>
+                <td className="py-2.5 px-3">{interval.activity}</td>{" "}
+                {/* Removed rounded corner */}
+                <td className="py-2.5 px-3 text-sm">
+                  {format(
+                    parseLocalISO(interval.startTime) || new Date(),
+                    "MMM dd, HH:mm",
+                  )}
+                </td>
+                <td className="py-2.5 px-3 text-sm rounded-r-lg">
+                  {" "}
+                  {/* Added rounded corner */}
+                  {format(
+                    parseLocalISO(interval.endTime) || new Date(),
+                    "HH:mm",
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
