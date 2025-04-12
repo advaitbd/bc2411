@@ -22,7 +22,10 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
       </h2>
       <div className="flex flex-col md:flex-row gap-6">
         <div className="flex-1 max-w-xs">
-          <label htmlFor="startHour" className="block text-sm text-gray-400 mb-2">
+          <label
+            htmlFor="startHour"
+            className="block text-sm text-gray-400 mb-2"
+          >
             Start Hour (00:00 - 23:00)
           </label>
           <select
@@ -46,7 +49,7 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
           <select
             id="endHour"
             value={endHour}
-            onChange={(e) => 
+            onChange={(e) =>
               onEndHourChange(Math.max(startHour + 1, parseInt(e.target.value)))
             }
             className="bg-gray-700 rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-purple-400 appearance-none cursor-pointer border border-gray-600"
@@ -59,11 +62,6 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
               >{`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}</option>
             ))}
           </select>
-        </div>
-        <div className="flex-1 flex items-end">
-          <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
-            <Info size={12} /> Note: Backend currently uses 8am-10pm (22:00) internally.
-          </p>
         </div>
       </div>
     </div>
