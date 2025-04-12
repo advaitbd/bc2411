@@ -355,7 +355,6 @@ def optimize_schedule():
         settings_errors = []
         alpha = 1 # Default, could be overridden by settings
         beta = 0.1  # Default, could be overridden by settings
-        gamma = 1
         daily_limit_slots = None # Default no limit
 
         # --- Combine Errors and Check ---
@@ -385,7 +384,6 @@ def optimize_schedule():
                  commitments=parsed_commitments,
                  alpha=alpha,
                  beta=beta,
-                 gamma=gamma,
                  daily_limit_slots=daily_limit_slots,
                  start_hour=start_hour, # Pass dynamic hours
                  end_hour=end_hour      # Pass dynamic hours
