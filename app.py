@@ -5,7 +5,7 @@ import math
 import traceback # For detailed error logging
 
 # --- CHANGE HERE: Import the Gurobi solver function ---
-from allocation_logic import (
+from allocation_logic_new import (
     # solve_schedule_pulp, # Remove or comment out PuLP import
     solve_schedule_gurobi,  # Import the new Gurobi function
     datetime_to_slot,
