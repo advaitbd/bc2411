@@ -4,7 +4,7 @@ import math
 import traceback # For detailed error logging
 
 # --- Import necessary functions ---
-from allocation_logic_new import (
+from allocation_logic_new_new import (
     solve_schedule_gurobi,
     datetime_to_slot,
     slot_to_datetime,
@@ -353,8 +353,8 @@ def optimize_schedule():
 
         # --- Parse Other Settings (e.g., Daily Limit - currently unused) ---
         settings_errors = []
-        alpha = 1.0 # Default, could be overridden by settings
-        beta = 0.1  # Default, could be overridden by settings
+        alpha = 1 # Default, could be overridden by settings
+        beta = 1  # Default, could be overridden by settings
         daily_limit_slots = None # Default no limit
 
         # --- Combine Errors and Check ---
