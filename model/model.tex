@@ -3,6 +3,7 @@
 \usepackage{geometry} % For adjusting margins
 \usepackage{amssymb} % For sets (\mathbb{R}, etc. if needed, and \emptyset)
 \usepackage{amsthm} % For definition environment if needed
+\usepackage{mathtools} % For ceiling function \lceil \rceil
 
 % Adjust page margins
 \geometry{a4paper, margin=1in}
@@ -11,7 +12,9 @@
 \setlength{\parskip}{0.5em}
 \setlength{\parindent}{0em}
 
-\title{Mathematical Optimization Model for Weekly Task Scheduling}
+\newtheorem{definition}{Definition} % Optional: For formal definitions
+
+\title{Mathematical Optimization Model for Weekly Task Scheduling (Updated)}
 \author{Formulation Documentation}
 \date{\today}
 
@@ -21,7 +24,7 @@
 
 \section{Overview}
 
-This document presents the mathematical formulation of an optimization model designed to generate a weekly task schedule. The model assigns start times to tasks within a defined time horizon, respecting various constraints, and optimizes a weighted combination of maximizing leisure time and minimizing task-related stress.
+This document presents the mathematical formulation of an optimization model designed to generate a weekly task schedule. The model first applies a pre-filter based on task duration, priority, and difficulty (the "Pi condition") to determine which tasks ($T$) are eligible for scheduling. It then assigns start times to all eligible tasks within a defined time horizon, respecting various constraints, and optimizes a weighted combination of maximizing leisure time and minimizing task-related stress.
 
 \subsection*{Time Horizon}
 The planning horizon covers $D = 7$ days. Each day consists of $S_{day} = 56$ discrete time slots of 15 minutes each, typically representing the period from 8:00 AM to 10:00 PM. The total number of slots in the horizon is $S_{total} = D \times S_{day} = 392$. Slots are indexed globally from $s = 0$ to $S_{total}-1$.
@@ -31,14 +34,16 @@ The planning horizon covers $D = 7$ days. Each day consists of $S_{day} = 56$ di
 The model utilizes the following input parameters:
 
 \begin{itemize}
-    \item \textbf{Set of Tasks ($T$):} The collection of tasks to be scheduled, indexed by $i$.
-    \item \textbf{Task Attributes ($\forall i \in T$):}
+    \item \textbf{Set of All Tasks ($T_{all}$):} The initial collection of tasks provided by the user, indexed by $i$.
+    \item \textbf{Task Attributes ($\forall i \in T_{all}$):}
     \begin{itemize}
         \item $p_i$: Numerical priority of task $i$.
-        \item $d_i$: Numerical difficulty of task $i$.
-        \item $dur_i$: Duration of task $i$, measured in the number of time slots.
+        \item $d_i$: Numerical difficulty of task $i$. Assumed $d_i > 0, p_i > 0$.
+        \item $dur\_slots_i$: Duration of task $i$, measured in the number of time slots (1 slot = 15 minutes).
+        \item $dur\_min_i$: Duration of task $i$, measured in minutes ($dur\_min_i = dur\_slots_i \times 15$).
         \item $dl_i$: Deadline for task $i$, represented as the global slot index by which the task must be fully completed.
         \item $AllowedSlots_i$: A subset of $\{0, ..., S_{total}-1\}$ indicating the permissible start slots for task $i$ based on its time preference (e.g., "morning", "afternoon").
+        \item $hard\_threshold$: Integer difficulty rating at or above which a task is considered "hard" (default: 4).
     \end{itemize}
     \item \textbf{Set of Committed Slots ($C$):} A subset of $\{0, ..., S_{total}-1\}$ representing time slots that are pre-allocated and unavailable for scheduling tasks (e.g., meetings, appointments).
     \item \textbf{Objective Weights:}
@@ -49,19 +54,49 @@ The model utilizes the following input parameters:
     \item \textbf{Daily Limit ($Limit_{daily}$, Optional):} An integer representing the maximum number of slots that can be occupied by tasks on any single day $d \in \{0, ..., D-1\}$.
 \end{itemize}
 
+\section{Task Pre-filtering (Pi Condition)}
+
+Before optimization, tasks are filtered based on a derived "Probability of Importance" (Pi) condition. Only tasks meeting this condition are considered schedulable.
+
+\begin{definition}[Schedulable Tasks (T)]
+A task $i \in T_{all}$ is considered schedulable and included in the set $T$ (where $T \subseteq T_{all}$) if it satisfies the following condition, which is derived from the original requirement that the probability of completion ($P_i$) must be at least 0.7:
+\begin{equation}
+dur\_min_i \ge (d_i \times p_i) \times \ln\left(\frac{10}{3}\right)
+\label{eq:pi_condition}\end{equation}
+Tasks in $T_{all}$ that do not meet this condition are excluded from the optimization process. Let $T = \{ i \in T_{all} \mid \text{Eq. (\ref{eq:pi_condition}) holds} \}$.
+\end{definition}
+
+\textbf{Derivation of the Pi Condition:}
+The condition stems from an underlying model assumption (not explicitly part of the MILP formulation, but used as a pre-filter) that a task $i$ is only viable if its estimated probability of completion ($P_i$) within the allocated time ($dur\_min_i$) is sufficient. This probability was defined in earlier documentation as:
+\[ P_i = 1 - \exp\left(-\lambda_i \times \frac{dur\_min_i}{d_i \times p_i}\right) \]
+where $\lambda_i$ is a rate parameter (assumed to be $\lambda_i = 1$), $d_i$ is difficulty, and $p_i$ is priority (urgency). The required threshold is $P_i \ge 0.7$.
+
+Setting $\lambda_i = 1$ and applying the threshold:
+\[ 1 - \exp\left(-\frac{dur\_min_i}{d_i \times p_i}\right) \ge 0.7 \]
+\[ 0.3 \ge \exp\left(-\frac{dur\_min_i}{d_i \times p_i}\right) \]
+Taking the natural logarithm of both sides (which preserves the inequality direction):
+\[ \ln(0.3) \ge -\frac{dur\_min_i}{d_i \times p_i} \]
+Multiply by -1 and reverse the inequality sign:
+\[ -\ln(0.3) \le \frac{dur\_min_i}{d_i \times p_i} \]
+Using the property $-\ln(x) = \ln(1/x)$:
+\[ \ln\left(\frac{1}{0.3}\right) \le \frac{dur\_min_i}{d_i \times p_i} \]
+\[ \ln\left(\frac{10}{3}\right) \le \frac{dur\_min_i}{d_i \times p_i} \]
+Rearranging for $dur\_min_i$ (assuming $d_i > 0, p_i > 0$):
+\[ dur\_min_i \ge (d_i \times p_i) \times \ln\left(\frac{10}{3}\right) \]
+This yields the inequality used in Definition 1.
+
+\textbf{Interpretation:} This filter removes tasks that are deemed too short relative to their combined difficulty and priority to meet the 70\% completion probability threshold under the assumed model. The constant $\ln(10/3) \approx 1.204$. Tasks that fail this check are reported as filtered out. The subsequent model formulation operates only on the set of schedulable tasks $T$.
+
 \section{Decision Variables}
 
-The model determines the values of the following variables:
+The model determines the values of the following variables for the set of \textbf{schedulable tasks $T$}:
 
 \begin{enumerate}
-    \item \textbf{$X_{i,s}$ (Binary):} Indicates if task $i$ starts at slot $s$.
+    \item \textbf{$X_{i,s}$ (Binary):} Indicates if schedulable task $i \in T$ starts at slot $s$.
     \[ X_{i,s} = \begin{cases} 1 & \text{if task } i \in T \text{ starts at slot } s \in \{0, ..., S_{total}-1\} \\ 0 & \text{otherwise} \end{cases} \]
 
-    \item \textbf{$Z_{i}$ (Binary):} Indicates if task $i$ is scheduled at all.
-    \[ Z_{i} = \begin{cases} 1 & \text{if task } i \in T \text{ is scheduled} \\ 0 & \text{otherwise} \end{cases} \]
-    
-    \item \textbf{$Y_{s}$ (Binary):} Indicates if slot $s$ is occupied by any task.
-    \[ Y_{s} = \begin{cases} 1 & \text{if slot } s \in \{0, ..., S_{total}-1\} \text{ is occupied by a task} \\ 0 & \text{otherwise} \end{cases} \]
+    \item \textbf{$Y_{s}$ (Binary):} Indicates if slot $s$ is occupied by any schedulable task $i \in T$.
+    \[ Y_{s} = \begin{cases} 1 & \text{if slot } s \in \{0, ..., S_{total}-1\} \text{ is occupied by a task } i \in T \\ 0 & \text{otherwise} \end{cases} \]
     This is an auxiliary variable linked to $X_{i,s}$ via constraints.
 
     \item \textbf{$L_{s}$ (Continuous):} Represents the leisure time (in minutes) available in slot $s$.
@@ -70,7 +105,7 @@ The model determines the values of the following variables:
 
 \section{Objective Function}
 
-The objective is to maximize a weighted sum reflecting the trade-off between leisure and stress:
+The objective is to maximize a weighted sum reflecting the trade-off between leisure and the stress associated with the scheduled tasks:
 
 \[
 \text{Maximize} \quad Z = \alpha \sum_{s=0}^{S_{total}-1} L_s - \beta \sum_{i \in T} \sum_{s=0}^{S_{total}-1} (p_i \times d_i) X_{i,s}
@@ -78,121 +113,109 @@ The objective is to maximize a weighted sum reflecting the trade-off between lei
 
 \textbf{Explanation:}
 \begin{itemize}
-    \item The first term, $\alpha \sum L_s$, promotes maximizing the total leisure time across all slots. The weight $\alpha$ scales the importance of leisure relative to stress reduction.
-    \item The second term, $\beta \sum (p_i \times d_i) X_{i,s}$, aims to minimize the total "stress" incurred. Stress for each task $i$ is defined as $p_i \times d_i$ and is counted if the task starts ($X_{i,s}=1$). The weight $\beta$ scales the penalty associated with scheduling high-priority or difficult tasks. This formulation associates stress with the initiation of a task, not its entire duration.
+    \item The first term, $\alpha \sum L_s$, promotes maximizing the total leisure time across all slots.
+    \item The second term, $\beta \sum (p_i \times d_i) X_{i,s}$, represents the total "stress" incurred from the scheduled tasks in set $T$. Since Constraint \ref{eq:task_must_start} requires all tasks $i \in T$ to be scheduled (i.e., $\sum_s X_{i,s} = 1$ for each $i \in T$), the total stress sum $\sum_{i \in T} (p_i \times d_i)$ becomes a constant value once the set $T$ is determined by the pre-filter. Therefore, minimizing this term primarily serves to break ties between solutions that achieve the same maximum leisure, potentially favoring schedules where stress (if variable per task instance, which it isn't here) is lower, or simply acts as a constant offset if $\beta > 0$. The primary optimization driver is typically the leisure term.
 \end{itemize}
 
 \section{Constraints}
 
-The following constraints define the feasible schedules:
+The following constraints define the feasible schedules for the set of \textbf{schedulable tasks $T$}:
 
-\subsection{Task Assignment and Selection}
+\subsection{Mandatory Task Assignment}
+Ensures every task that passed the pre-filter (i.e., is in set $T$) is scheduled exactly once.
 
-Instead of requiring every task to be scheduled, the model now uses a target completion rate and allows selecting which tasks to schedule:
+\begin{equation}
+\sum_{s=0}^{S_{total}-1} X_{i,s} = 1 \quad \forall i \in T \label{eq:task_must_start}
+\end{equation}
 
-\[
-Z_i = \sum_{s=0}^{S_{total}-1} X_{i,s} \quad \forall i \in T
-\]
-
-\textbf{Explanation:} This links the task selection variable $Z_i$ to the start slot variables $X_{i,s}$ for every task $i$. If task $i$ is scheduled to start at any slot ($X_{i,s}=1$ for some $s$), then $Z_i=1$. Otherwise, $Z_i=0$ (task is not scheduled).
-
-\subsection{Target Completion Rate}
-Ensures that a specified minimum percentage of tasks are scheduled:
-
-\[
-\sum_{i \in T} Z_{i} \geq \lceil |T| \times \text{target\_rate} \rceil
-\]
-
-\textbf{Explanation:} The constraint ensures that at least a target percentage (default: 70\%) of all tasks are scheduled. This provides a more realistic model as it doesn't assume all tasks must be completed. The ceiling function $\lceil \cdot \rceil$ ensures a whole number of tasks are scheduled.
+\textbf{Explanation:} For every task $i$ in the set of schedulable tasks $T$, exactly one start slot $s$ must be chosen ($X_{i,s}=1$). This enforces that all tasks deemed viable by the pre-filter are included in the final schedule. If this constraint cannot be met simultaneously with other constraints (e.g., due to lack of available slots), the model will be infeasible.
 
 \subsection{Hard Task Limitation}
-Restricts the number of difficult tasks scheduled on any single day:
+Restricts the number of difficult tasks (from set $T$) starting on any single day.
 
 \[
 \sum_{i \in T_{\text{hard}}} \sum_{s \in \text{Slots}_{day,d}} X_{i,s} \leq 1 \quad \forall d \in \{0, ..., D-1\}
 \]
+where $T_{\text{hard}} = \{i \in T : d_i \geq \text{hard\_threshold}\}$ is the subset of \textit{schedulable} tasks with difficulty ratings at or above the threshold. $Slots_{day,d}$ is the set of global slot indices belonging to day $d$.
 
-where $T_{\text{hard}} = \{i \in T : d_i \geq \text{hard\_threshold}\}$ is the subset of tasks with difficulty ratings at or above the specified threshold (default: 4).
-
-\textbf{Explanation:} For each day $d$, this constraint sums the start variables $X_{i,s}$ for all hard tasks $i$ and all slots $s$ on day $d$. By limiting this sum to at most 1, the constraint ensures that at most one hard task can start on any given day. This prevents overloading days with too many challenging tasks.
+\textbf{Explanation:} For each day $d$, this sums the start variables $X_{i,s}$ only for hard tasks within the schedulable set $T$ that start on day $d$. Limiting this sum to at most 1 ensures no more than one hard (and schedulable) task begins on any single day.
 
 \subsection{Deadlines and Horizon}
-Ensures that tasks are completed by their deadline and fit entirely within the scheduling horizon.
+Ensures that scheduled tasks (from set $T$) are completed by their deadline and fit entirely within the scheduling horizon.
 
 \[
-X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } (s + dur_i - 1 > dl_i) \lor (s + dur_i > S_{total})
+X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } (s + dur\_slots_i - 1 > dl_i) \lor (s + dur\_slots_i > S_{total})
 \]
 
-\textbf{Explanation:}
-\begin{itemize}
-    \item \textbf{Deadline Check ($s + dur_i - 1 > dl_i$):} A task $i$ starting at slot $s$ occupies slots from $s$ to $s + dur_i - 1$. The term $s + dur_i - 1$ represents the index of the last slot occupied by the task. This constraint forces the start variable $X_{i,s}$ to be 0 if the last occupied slot exceeds the task's specified deadline slot $dl_i$. This prevents tasks from starting if they cannot finish on time.
-    \item \textbf{Horizon Check ($s + dur_i > S_{total}$):} The term $s + dur_i$ represents the index of the slot immediately following the task's completion. If this index is greater than the total number of slots $S_{total}$, it means the task would extend beyond the planning horizon. This constraint forces $X_{i,s}$ to 0 in such cases, ensuring tasks are fully contained within the schedule.
-\end{itemize}
+\textbf{Explanation:} This prevents a task $i \in T$ from starting at slot $s$ if its last slot ($s + dur\_slots_i - 1$) would occur after its deadline slot $dl_i$, or if the task duration causes it to extend beyond the total number of slots $S_{total}$. Note that $s + dur\_slots_i > S_{total}$ is equivalent to $s + dur\_slots_i - 1 \ge S_{total}$, meaning the last slot is outside the valid range $[0, S_{total}-1]$.
 
 \subsection{No Overlap}
-Prevents two or more tasks from being active in the same time slot.
+Prevents two or more scheduled tasks (from set $T$) from being active in the same time slot.
 
 \[
-\sum_{i \in T} \sum_{s = \max(0, t - dur_i + 1)}^{t} X_{i,s} \le 1 \quad \forall t \in \{0, ..., S_{total}-1\}
+\sum_{i \in T} \sum_{start = \max(0, t - dur\_slots_i + 1)}^{t} X_{i,start} \le 1 \quad \forall t \in \{0, ..., S_{total}-1\}
 \]
 
-\textbf{Explanation:} For any given time slot $t$, this constraint considers all tasks $i$. The inner sum iterates through potential start slots $s$ for task $i$. The range $\max(0, t - dur_i + 1)$ to $t$ identifies precisely those start slots $s$ such that task $i$, if started at $s$, would be active during slot $t$. By summing the $X_{i,s}$ variables for all such task/start-slot combinations, we count how many tasks are active in slot $t$. Constraining this sum to be less than or equal to 1 ensures that at most one task can occupy any single slot $t$.
+\textbf{Explanation:} For any time slot $t$, this sums the start variables $X_{i,start}$ for all tasks $i \in T$ that would be active during slot $t$. A task $i$ started at $start$ is active during slot $t$ if $start \le t < start + dur\_slots_i$. The inner summation correctly identifies these relevant start times. Constraining the sum to be $\le 1$ ensures mutual exclusivity.
 
 \subsection{Preferences}
-Restricts the starting time of tasks to their allowed time windows (e.g., morning, afternoon).
+Restricts the starting time of scheduled tasks (from set $T$) to their allowed time windows.
 
 \[
 X_{i,s} = 0 \quad \forall i \in T, \forall s \notin AllowedSlots_i
 \]
 
-\textbf{Explanation:} For each task $i$, $AllowedSlots_i$ is the set of permissible start slots based on user preference. This constraint directly enforces the preference by setting the start variable $X_{i,s}$ to 0 for any slot $s$ that is not within the task's allowed set. This prevents the task from starting outside its desired time window(s).
+\textbf{Explanation:} Enforces the start variable $X_{i,s}$ to be 0 for any task $i \in T$ if slot $s$ is outside its permitted preference set $AllowedSlots_i$.
 
 \subsection{Commitments}
-Prevents any part of a scheduled task from coinciding with predefined fixed commitments.
+Prevents any part of a scheduled task (from set $T$) from coinciding with predefined fixed commitments (set $C$).
 
 \[
-X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } \{s, s+1, ..., s + dur_i - 1\} \cap C \neq \emptyset
+X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } \{s, s+1, ..., s + dur\_slots_i - 1\} \cap C \neq \emptyset
 \]
 
-\textbf{Explanation:} For each task $i$ and potential start slot $s$, the set $\{s, s+1, ..., s + dur_i - 1\}$ represents all slots the task would occupy if it started at $s$. This constraint checks if this set has any overlap (non-empty intersection, $\cap C \neq \emptyset$) with the set of committed slots $C$. If an overlap exists, it means starting task $i$ at $s$ would conflict with a commitment. Therefore, the constraint forces $X_{i,s}$ to 0, preventing the task from starting at that time.
+\textbf{Explanation:} Prevents task $i \in T$ from starting at $s$ if any slot it would occupy during its duration (from $s$ to $s + dur\_slots_i - 1$) overlaps with the set of committed slots $C$.
 
 \subsection{Leisure Calculation and Occupation Link (Y)}
-Links the auxiliary occupation variable $Y_s$ to the task start variables $X_{i,s}$ and defines the leisure time $L_s$ based on occupation and commitments.
+Links the auxiliary occupation variable $Y_s$ to the task start variables $X_{i,s}$ for schedulable tasks (from set $T$) and defines leisure $L_s$.
 
 \begin{align}
-Y_s &= \sum_{i \in T} \sum_{start = \max(0, s - dur_i + 1)}^{s} X_{i,start} \quad &&\forall s \in \{0, ..., S_{total}-1\} \label{eq:link_y} \\
-L_s &= 0 \quad &&\forall s \in C \label{eq:leisure_commit} \\
-L_s &\le 15 \times (1 - Y_s) \quad &&\forall s \notin C \label{eq:leisure_task} \\
-L_s &\ge 0 \quad &&\forall s \label{eq:leisure_nonneg}
+% Re-using the No Overlap logic to define Y_s explicitly
+Y_s &= \sum_{i \in T} \sum_{start = \max(0, s - dur\_slots_i + 1)}^{s} X_{i,start} \quad &&\forall s \in \{0, ..., S_{total}-1\} \label{eq:link_y_updated} \\
+L_s &= 0 \quad &&\forall s \in C \label{eq:leisure_commit_updated} \\
+L_s &\le 15 \times (1 - Y_s) \quad &&\forall s \notin C \label{eq:leisure_task_updated} \\
+L_s &\ge 0 \quad &&\forall s \label{eq:leisure_nonneg_updated}
 \end{align}
 
 \textbf{Explanation:}
 \begin{itemize}
-    \item \textbf{Equation (\ref{eq:link_y}):} This constraint defines the occupation variable $Y_s$. It equates $Y_s$ to the same sum used in the "No Overlap" constraint. Since the No Overlap constraint ensures that this sum can only be 0 or 1, this equality correctly sets $Y_s = 1$ if slot $s$ is occupied by any task, and $Y_s = 0$ otherwise. This makes $Y_s$ a reliable binary indicator of task occupation for slot $s$.
-    \item \textbf{Equation (\ref{eq:leisure_commit}):} If slot $s$ belongs to the set of commitments $C$, no leisure time is possible, so $L_s$ is forced to 0.
-    \item \textbf{Equation (\ref{eq:leisure_task}):} If slot $s$ is not committed ($s \notin C$), this constraint limits the leisure time. If the slot is occupied by a task ($Y_s = 1$), then $1 - Y_s = 0$, forcing $L_s \le 0$. Since $L_s$ must also be non-negative (Eq. \ref{eq:leisure_nonneg}), $L_s$ becomes exactly 0. If the slot is not occupied by a task ($Y_s = 0$), then $1 - Y_s = 1$, allowing $L_s \le 15$. The objective function, seeking to maximize $\sum L_s$, will push $L_s$ to its upper bound of 15 in this unoccupied, non-committed case.
-    \item \textbf{Equation (\ref{eq:leisure_nonneg}):} Explicitly states (or is implied by variable definition) that leisure time cannot be negative.
+    \item Equation (\ref{eq:link_y_updated}) defines $Y_s$ to be 1 if slot $s$ is occupied by any task $i \in T$, and 0 otherwise. This re-uses the logic from the No Overlap constraint (6.4) to determine occupation at slot $s$. Because of constraint 6.4, the sum on the right-hand side can only be 0 or 1, making $Y_s$ effectively binary.
+    \item Equation (\ref{eq:leisure_commit_updated}) sets leisure to 0 for committed slots.
+    \item Equation (\ref{eq:leisure_task_updated}) allows leisure up to 15 minutes only if the slot $s$ is not committed (checked implicitly by applying this only to $s \notin C$) AND not occupied by a task ($Y_s=0$). The objective function seeks to maximize $L_s$, so it will push $L_s$ to 15 if allowed by this constraint.
+    \item Equation (\ref{eq:leisure_nonneg_updated}) ensures leisure is non-negative (though $L_s \in [0, 15]$ is defined earlier).
 \end{itemize}
 
 \subsection{Daily Limits (Optional)}
-Enforces a maximum total duration of tasks scheduled within any single day.
+Enforces a maximum total number of task-occupied slots (by tasks from $T$) within any single day.
 
-Let $Slots_{day, d} = \{s \mid d \times S_{day} \le s < (d+1) \times S_{day}\}$ be the set of slots for day $d$.
 \[
 \sum_{s \in Slots_{day, d}} Y_s \le Limit_{daily} \quad \forall d \in \{0, ..., D-1\}
 \]
+where $Slots_{day, d}$ is the set of global slot indices belonging to day $d$.
 
-\textbf{Explanation:} This constraint operates on a per-day basis ($d=0$ to $D-1$). For each day, it sums the occupation variables $Y_s$ over all slots $s$ belonging to that day ($Slots_{day, d}$). Since $Y_s=1$ if a slot is occupied by a task and 0 otherwise, this sum represents the total number of task-occupied slots on day $d$. The constraint ensures this total does not exceed the specified $Limit_{daily}$.
+\textbf{Explanation:} For each day $d$, the total number of slots $s$ occupied by tasks from $T$ (indicated by $Y_s=1$) must not exceed the optional parameter $Limit_{daily}$.
 
 \section{Output}
 
-If the optimization problem is feasible and a solution is found (potentially optimal or feasible within a time limit), the model output provides the values of the decision variables. This typically translates to:
+If the optimization problem is feasible and a solution is found, the model output provides:
 \begin{itemize}
     \item The optimal objective function value $Z$.
-    \item A schedule detailing the assigned start slot $s$ (where $X_{i,s}=1$) for each selected task $i$ (where $Z_i=1$).
+    \item A schedule detailing the assigned start slot $s$ (where $X_{i,s}=1$) for each schedulable task $i \in T$.
     \item The calculated total leisure time $\sum L_s$.
-    \item The calculated total stress score $\sum (p_i \times d_i) X_{i,s}$.
-    \item The achieved task completion rate $\frac{\sum Z_i}{|T|}$.
+    \item The calculated total stress score based on scheduled tasks: $\sum_{i \in T} (p_i \times d_i)$. (Note: This is constant for a given set $T$).
+    \item A list of tasks from the original set $T_{all}$ that were filtered out by the Pi condition and thus not considered for scheduling (set $T_{all} \setminus T$). Includes the reason for filtering.
+    \item The effective completion rate, calculated as $|T| / |T_{all}|$, representing the fraction of initially provided tasks that were deemed schedulable by the filter.
 \end{itemize}
+If no feasible schedule exists for the set of tasks $T$ (meaning it's impossible to schedule all tasks in $T$ while respecting all constraints), the model reports infeasibility.
 
 \end{document}

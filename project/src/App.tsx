@@ -9,6 +9,7 @@ import TimeWindow from "./components/TimeWindow";
 import TasksList from "./components/TasksList";
 import BlockedIntervalsList from "./components/BlockedIntervalsList";
 // import ModeSelection from "./components/ModeSelection"; // <-- REMOVE
+import ModelExplanation from "./components/ModelExplanation"; // <-- IMPORT NEW COMPONENT
 import { useState, useMemo, useEffect, useCallback } from "react";
 // Import types and utilities
 import {
@@ -33,7 +34,7 @@ import {
 } from "date-fns";
 import { processBlockData } from "./components/BlockForm";
 import BlockFormFields from "./components/BlockForm";
-import { Sparkles, AlertCircle, X } from "lucide-react";
+import { Sparkles, AlertCircle, X, HelpCircle } from "lucide-react"; // <-- Add HelpCircle
 import TaskFormFields from "./components/TaskForm";
 
 // Import custom CSS
@@ -77,6 +78,7 @@ function App() {
     ScheduledTaskItem | BlockedInterval | null
   >(null);
   const [showEventDetailsModal, setShowEventDetailsModal] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false); // <-- State for explanation modal
 
   // --- Form States ---
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
@@ -766,11 +768,21 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-900 text-gray-100 p-4 md:p-8 font-sans">
       <div className="max-w-screen-2xl mx-auto">
-        <header className="flex items-center gap-3 mb-8">
-          <Sparkles className="w-8 h-8 text-purple-400 flex-shrink-0" />
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-purple-400 to-pink-500 text-transparent bg-clip-text">
-            IntelliSchedule
-          </h1>
+        <header className="flex items-center justify-between gap-3 mb-8">
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-8 h-8 text-purple-400 flex-shrink-0" />
+            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-purple-400 to-pink-500 text-transparent bg-clip-text">
+              IntelliSchedule
+            </h1>
+          </div>
+          {/* Explanation Button */}
+          <button
+            onClick={() => setShowExplanation(true)}
+            className="text-gray-400 hover:text-purple-300 transition-colors p-2 rounded-full hover:bg-gray-700 flex items-center gap-1.5 text-sm"
+            title="Explain Scheduler Logic"
+          >
+            <HelpCircle size={18} /> How it Works
+          </button>
         </header>
 
         {/* General Error Display */}
@@ -791,8 +803,6 @@ function App() {
               </button>
             </div>
           )}
-
-        {/* Remove Mode Selection / Loading check - always show content */}
 
         {/* Main Content Area */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
@@ -815,7 +825,7 @@ function App() {
               onOptimize={handleOptimize}
               onEditFilteredTask={handleEditFilteredTask}
               onAutoAdjustDuration={handleAutoAdjustDuration}
-              onGenerateTasks={handleGenerateTasks} // <-- Pass Generate Tasks handler
+              onGenerateTasks={handleGenerateTasks}
             />
 
             <BlockedIntervalsList
@@ -824,7 +834,7 @@ function App() {
               onAddBlock={() => setShowNewBlockForm(true)}
               onEditBlock={handleEditBlockClick}
               onDeleteBlock={handleDeleteBlock}
-              onGenerateBlocks={handleGenerateBlocks} // <-- Pass Generate Blocks handler
+              onGenerateBlocks={handleGenerateBlocks}
             />
             {/* Keep Import Button */}
             <button
@@ -952,6 +962,11 @@ function App() {
             onImport={handleImport}
             importErrors={importErrors}
           />
+        )}
+
+        {/* Model Explanation Modal */}
+        {showExplanation && (
+          <ModelExplanation onClose={() => setShowExplanation(false)} />
         )}
       </div>
 

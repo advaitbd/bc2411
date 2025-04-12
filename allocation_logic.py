@@ -3,10 +3,6 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 import math
 import traceback # Keep for potential debugging in helpers
-from pulp import (
-    LpProblem, LpMaximize, LpVariable, LpBinary, LpContinuous,
-    lpSum, LpStatus, PULP_CBC_CMD # Import solver if needed explicitly
-)
 # --- Import Gurobi ---
 import gurobipy as gp
 from gurobipy import GRB
@@ -136,17 +132,17 @@ PREFERENCE_MAP = {
 # GUROBI SCHEDULER FUNCTION
 # ------------------------------------------------------------
 
-def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None, time_limit_sec=30, hard_task_threshold=4): # Removed target_completion_rate
+def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_slots=None, time_limit_sec=30, hard_task_threshold=4):
     """
-    Solves the scheduling problem using Gurobi. Implements Pi >= 0.7 as a pre-filter
+    Solves the scheduling problem using Gurobi. Implements Pi-based condition as a pre-filter
     and schedules all eligible tasks.
 
     Args:
-        tasks (list): List of task dictionaries.
-        commitments (dict): Dictionary mapping blocked GLOBAL slots to 15.
+        tasks (list): List of task dictionaries (T_all).
+        commitments (dict): Dictionary mapping blocked GLOBAL slots to 15. (Set C)
         alpha (float): Weight for maximizing leisure time.
         beta (float): Weight for minimizing stress.
-        daily_limit_slots (int, optional): Maximum task slots per day.
+        daily_limit_slots (int, optional): Maximum task slots per day (Limit_daily).
         time_limit_sec (int): Solver time limit in seconds.
         hard_task_threshold (int): Difficulty level threshold above which a task is considered hard (inclusive).
 
@@ -159,23 +155,19 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
     print(f"Gurobi Solver params: Alpha={alpha}, Beta={beta}, DailyLimitSlots={daily_limit_slots}, TimeLimit={time_limit_sec}s")
     print(f"Hard task threshold: {hard_task_threshold}")
 
-    # --- Pre-filter tasks based on Pi >= 0.7 derived condition ---
-    # Pi >= 0.7  =>  1 - exp(-(Duration_min / (Diff * Prio))) >= 0.7
-    # => exp(-(Duration_min / (Diff * Prio))) <= 0.3
-    # => -(Duration_min / (Diff * Prio)) <= ln(0.3)
-    # => Duration_min / (Diff * Prio) >= -ln(0.3) = ln(1/0.3) = ln(10/3)
-    # => Duration_min >= (Diff * Prio) * ln(10/3)
-    # We assume difficulty and priority are >= 1. Handle potential Prio=0 or Diff=0 if necessary.
+    # --- Pre-filter tasks based on Pi condition (Section 3 in model.tex) ---
+    # Condition: Duration_min >= (Difficulty * Priority) * ln(10/3)
+    # Corresponds to the check in Definition 1: Schedulable Tasks (T)
     LN_10_OVER_3 = math.log(10/3) # Approx 1.204
 
-    schedulable_tasks = []
-    unschedulable_tasks_info = [] # Changed field name for clarity
-    original_task_count = len(tasks)
+    schedulable_tasks = [] # This becomes Set T in the model
+    unschedulable_tasks_info = []
+    original_task_count = len(tasks) # |T_all|
 
     for i, task in enumerate(tasks):
         duration_min = task["duration_slots"] * 15
-        difficulty = task.get("difficulty", 1)
-        priority = task.get("priority", 1)
+        difficulty = task.get("difficulty", 1) # d_i
+        priority = task.get("priority", 1) # p_i
         task_id = task.get('id', f"task-orig-{i}")
         task_name = task.get('name', f"Task {i}")
 
@@ -185,21 +177,20 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                  "id": task_id,
                  "name": task_name,
                  "reason": "Non-positive difficulty or priority",
-                 "required_duration_min": None, # Indicate not applicable
+                 "required_duration_min": None,
                  "current_duration_min": duration_min,
              })
              continue
 
         stress_factor = difficulty * priority
         required_duration_min_float = stress_factor * LN_10_OVER_3
-        # Round up to nearest minute for requirement
         required_duration_min_int = math.ceil(required_duration_min_float)
 
-        if duration_min >= required_duration_min_float: # Use float for comparison accuracy
-            schedulable_tasks.append(task.copy())
+        if duration_min >= required_duration_min_float:
+            schedulable_tasks.append(task.copy()) # Add to set T
         else:
             reason_str = (
-                f"Pi < 0.7 condition not met. Required duration: "
+                f"Pi condition not met. Required duration: "
                 f"~{required_duration_min_int} min, Actual: {duration_min} min "
                 f"(based on Difficulty: {difficulty}, Priority: {priority})"
             )
@@ -208,25 +199,24 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                  "id": task_id,
                  "name": task_name,
                  "reason": reason_str,
-                 "required_duration_min": required_duration_min_int, # Provide the calculated requirement
+                 "required_duration_min": required_duration_min_int,
                  "current_duration_min": duration_min,
             })
 
-    n_tasks = len(schedulable_tasks) # Number of tasks to actually schedule
-    print(f"Filtered tasks: {n_tasks} tasks are schedulable (meet Pi>=0.7 condition), {len(unschedulable_tasks_info)} tasks filtered out.")
+    n_tasks = len(schedulable_tasks) # |T|
+    print(f"Filtered tasks: {n_tasks} tasks are schedulable (meet Pi condition), {len(unschedulable_tasks_info)} tasks filtered out.")
 
     if n_tasks == 0:
         print("Gurobi Solver: No schedulable tasks remaining after Pi filter.")
         total_possible_minutes = TOTAL_SLOTS * 15
         committed_minutes = len(commitments) * 15
         initial_leisure = total_possible_minutes - committed_minutes
-        message = "No tasks provided or all tasks were filtered out."
+        message = "No tasks provided or all tasks were filtered out by the Pi condition."
         if unschedulable_tasks_info:
-             # Example of constructing a more detailed message if needed
              filtered_names = [f"{t['name']} (needs {t['required_duration_min']}m)" for t in unschedulable_tasks_info if t['required_duration_min'] is not None]
              if filtered_names:
                   message += f" Filtered tasks needing more time: {', '.join(filtered_names)}."
-             else: # Only non-positive diff/prio tasks
+             else:
                   message += " Some tasks filtered due to non-positive difficulty/priority."
 
         return {'status': 'No Schedulable Tasks', 'schedule': [], 'total_leisure': initial_leisure, 'total_stress': 0.0, 'message': message, 'filtered_tasks_info': unschedulable_tasks_info}
@@ -234,83 +224,85 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
     # --- Create Gurobi Model ---
     try:
         with gp.Env(empty=True) as env:
-            # env.setParam('OutputFlag', 0) # Suppress Gurobi console output (optional)
             env.start()
             with gp.Model("Weekly_Scheduler", env=env) as m:
-                m.setParam('OutputFlag', 0) # Suppress console output for this model
-                m.setParam(GRB.Param.TimeLimit, time_limit_sec) # Set time limit
+                m.setParam('OutputFlag', 0)
+                m.setParam(GRB.Param.TimeLimit, time_limit_sec)
 
-                # --- Decision variables ---
-                # X[i, s] = 1 if schedulable task i starts at slot s, 0 otherwise
+                # --- Decision Variables (Section 4 in model.tex) ---
+                # X[i, s] = 1 if schedulable task i (from T) starts at slot s, 0 otherwise
                 X = m.addVars(n_tasks, TOTAL_SLOTS, vtype=GRB.BINARY, name="X")
 
-                # Y[s] = 1 if slot s is occupied by *any* task, 0 otherwise
+                # Y[s] = 1 if slot s is occupied by *any* schedulable task, 0 otherwise
                 Y = m.addVars(TOTAL_SLOTS, vtype=GRB.BINARY, name="Y")
 
                 # L_var[s] = amount of leisure time (in minutes) in slot s
                 L_var = m.addVars(TOTAL_SLOTS, vtype=GRB.CONTINUOUS, lb=0, ub=15, name="L")
 
-                # --- Objective Function ---
-                # Maximize leisure, minimize stress (using properties of schedulable tasks)
+                # --- Objective Function (Section 5 in model.tex) ---
+                # Maximize alpha * Leisure - beta * Stress
                 obj_leisure = alpha * gp.quicksum(L_var[s] for s in range(TOTAL_SLOTS))
+                # Stress is calculated for scheduled tasks (which are all tasks in T due to Constraint 6.1)
                 obj_stress = beta * gp.quicksum(X[i, s] * (schedulable_tasks[i]["priority"] * schedulable_tasks[i]["difficulty"])
                                                for i in range(n_tasks) for s in range(TOTAL_SLOTS))
                 m.setObjective(obj_leisure - obj_stress, GRB.MAXIMIZE)
 
-                # --- Constraints ---
-                # (a.1) Each schedulable task MUST be scheduled and have exactly one start slot
+                # --- Constraints (Section 6 in model.tex) ---
+
+                # 6.1: Mandatory Task Assignment
+                # Ensures every task i in T (schedulable_tasks) is scheduled exactly once.
                 for i in range(n_tasks):
                     m.addConstr(X.sum(i, '*') == 1, name=f"TaskMustStart_{i}")
 
-                # (a.2) REMOVED: Target completion rate constraint (replaced by Pi filter and TaskMustStart)
-
-                # (a.3) Hard task limitation - at most one hard task per day (among schedulable tasks)
+                # 6.2: Hard Task Limitation
+                # At most one hard task (difficulty >= threshold) can start per day. Applies to tasks in T.
                 hard_tasks_indices = [i for i in range(n_tasks) if schedulable_tasks[i]["difficulty"] >= hard_task_threshold]
-                print(f"Identified {len(hard_tasks_indices)} schedulable hard tasks with difficulty >= {hard_task_threshold}")
-
+                print(f"Identified {len(hard_tasks_indices)} schedulable hard tasks (difficulty >= {hard_task_threshold})")
                 for d in range(TOTAL_DAYS):
                     day_start_slot = d * SLOTS_PER_DAY
                     day_end_slot = day_start_slot + SLOTS_PER_DAY
-
-                    # Sum of scheduled hard tasks starting within this day
+                    # Sum starts of hard tasks within this day
                     hard_task_vars_for_day = gp.quicksum(X[i, s] for i in hard_tasks_indices
                                                for s in range(day_start_slot, day_end_slot))
-
-                    if hard_tasks_indices:  # Only add constraint if there are hard tasks
+                    if hard_tasks_indices:
                         m.addConstr(hard_task_vars_for_day <= 1, name=f"MaxOneHardTask_Day_{d}")
-                        print(f"  Constraint Day {d}: Max 1 hard task (difficulty >= {hard_task_threshold})")
+                        print(f"  Constraint Day {d}: Max 1 hard task (from T) start (diff >= {hard_task_threshold})")
 
-                # (a.4) REMOVED: TaskHasExactlyOneStartIfScheduled (replaced by TaskMustStart)
-
-                # (b) Deadlines & Horizon: Task must finish by deadline and fit within horizon
+                # 6.3: Deadlines and Horizon
+                # Task i (in T) cannot start at s if it finishes after its deadline (dl_i) or after the horizon (S_total).
                 for i in range(n_tasks):
                     task_data = schedulable_tasks[i]
-                    dur = task_data["duration_slots"]
-                    dl = task_data["deadline_slot"]
+                    dur = task_data["duration_slots"] # dur_slots_i
+                    dl = task_data["deadline_slot"] # dl_i
                     task_key = task_data.get('id', i)
                     for s in range(TOTAL_SLOTS):
-                        # Deadline check: last slot (s+dur-1) must be <= dl
+                        # Deadline check: last slot (s + dur - 1) must be <= dl_i
                         if s + dur - 1 > dl:
                             m.addConstr(X[i, s] == 0, name=f"Deadline_{task_key}_s{s}")
-                        # Horizon check: last slot (s+dur-1) must be < TOTAL_SLOTS
+                        # Horizon check: task must end within horizon (last slot < S_total)
+                        # Equivalent to: s + dur <= S_total, or s <= S_total - dur
                         if s > TOTAL_SLOTS - dur:
                              m.addConstr(X[i, s] == 0, name=f"HorizonEnd_{task_key}_s{s}")
 
-                # (c) No Overlap: At most one task can *occupy* any given slot t
+                # 6.4: No Overlap
+                # Sum of tasks i (in T) occupying slot t must be <= 1.
                 for t in range(TOTAL_SLOTS):
+                    # Sum X[i, start] for tasks i active during slot t
+                    # Task i is active at t if it started at 'start' where: start <= t < start + dur_slots_i
+                    # Or equivalently: t - dur_slots_i + 1 <= start <= t
                     occupying_tasks_vars = []
                     for i in range(n_tasks):
-                        task_data = schedulable_tasks[i]
-                        dur = task_data["duration_slots"]
-                        # Task i occupies slot t if it starts in s such that: s <= t < s + dur
-                        for s in range(max(0, t - dur + 1), t + 1):
-                             if s + dur <= TOTAL_SLOTS:
-                                 occupying_tasks_vars.append(X[i, s])
+                        dur = schedulable_tasks[i]["duration_slots"]
+                        for start_slot in range(max(0, t - dur + 1), t + 1):
+                             # Ensure start_slot is valid and task does not exceed horizon if starting here
+                             if start_slot < TOTAL_SLOTS and start_slot + dur <= TOTAL_SLOTS:
+                                 occupying_tasks_vars.append(X[i, start_slot])
 
                     if occupying_tasks_vars:
                          m.addConstr(gp.quicksum(occupying_tasks_vars) <= 1, name=f"NoOverlap_s{t}")
 
-                # (d) Preferences: Task i can only start in a slot matching its preference
+                # 6.5: Preferences
+                # Task i (in T) cannot start at s if s is not in its AllowedSlots_i.
                 for i in range(n_tasks):
                     task_data = schedulable_tasks[i]
                     pref = task_data.get("preference", "any")
@@ -318,48 +310,56 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                     if pref not in PREFERENCE_MAP:
                         print(f"Warning: Invalid preference '{pref}' for task {task_key}. Defaulting to 'any'.")
                         pref = "any"
-                    allowed_slots = PREFERENCE_MAP.get(pref, PREFERENCE_MAP["any"])
+                    allowed_slots = PREFERENCE_MAP.get(pref, PREFERENCE_MAP["any"]) # AllowedSlots_i
 
                     for s in range(TOTAL_SLOTS):
                         if s not in allowed_slots:
                             m.addConstr(X[i, s] == 0, name=f"PrefWin_{task_key}_s{s}")
 
-                # (e) Commitments: No task can start if it would overlap with a committed slot
-                committed_slots = set(commitments.keys())
+                # 6.6: Commitments
+                # Task i (in T) cannot start at s if it would occupy any slot in C.
+                committed_slots = set(commitments.keys()) # Set C
                 for i in range(n_tasks):
                     task_data = schedulable_tasks[i]
                     dur = task_data["duration_slots"]
                     task_key = task_data.get('id', i)
                     for s in range(TOTAL_SLOTS):
-                        # Slots task *would* occupy: s to s+dur-1
+                        # Slots task *would* occupy if it starts at s: {s, s+1, ..., s + dur - 1}
                         task_occupies = set(range(s, min(s + dur, TOTAL_SLOTS)))
+                        # Check intersection with committed slots C
                         if task_occupies.intersection(committed_slots):
                             m.addConstr(X[i, s] == 0, name=f"CommitOverlap_{task_key}_s{s}")
 
-                # (f) Leisure Calculation: Link L_var with Y (task occupation) and commitments
+                # 6.7: Leisure Calculation and Occupation Link (Y)
+                # Links Y_s to X_{i,start} and defines L_s based on Y_s and commitments C.
                 for s in range(TOTAL_SLOTS):
+                    # Equation (6): Link Y_s to active tasks from T at slot s
+                    # Y_s = Sum_{i in T} Sum_{start = max(0, s - dur_i + 1)}^{s} X_{i, start}
                     occupying_task_vars_sum = gp.LinExpr()
                     for i in range(n_tasks):
-                        task_data = schedulable_tasks[i]
-                        dur = task_data["duration_slots"]
+                        dur = schedulable_tasks[i]["duration_slots"]
                         for start_slot in range(max(0, s - dur + 1), s + 1):
-                            if start_slot + dur <= TOTAL_SLOTS:
+                            if start_slot < TOTAL_SLOTS and start_slot + dur <= TOTAL_SLOTS:
                                 occupying_task_vars_sum.add(X[i, start_slot])
-
                     m.addConstr(Y[s] == occupying_task_vars_sum, name=f"Link_Y_Exact_{s}")
 
+                    # Equation (7): L_s = 0 if s is committed (s in C)
                     is_committed = 1 if s in commitments else 0
                     if is_committed:
                         m.addConstr(L_var[s] == 0, name=f"NoLeisure_Committed_{s}")
+                    # Equation (8): L_s <= 15 * (1 - Y_s) if s is not committed
                     else:
                         m.addConstr(L_var[s] <= 15 * (1 - Y[s]), name=f"LeisureBound_NotCommitted_{s}")
+                    # Equation (9) L_s >= 0 is implicitly handled by variable definition lb=0
 
-                # (g) Daily Limits (Optional)
+                # 6.8: Daily Limits (Optional)
+                # Sum of occupied slots Y_s within a day d must be <= Limit_daily.
                 if daily_limit_slots is not None and daily_limit_slots >= 0:
                     print(f"Applying daily limit of {daily_limit_slots} slots ({daily_limit_slots * 15} minutes)")
                     for d in range(TOTAL_DAYS):
                         day_start_slot = d * SLOTS_PER_DAY
                         day_end_slot = day_start_slot + SLOTS_PER_DAY
+                        # Sum Y[s] for slots s in day d
                         daily_task_slots_sum = gp.quicksum(Y[s] for s in range(day_start_slot, day_end_slot))
                         m.addConstr(daily_task_slots_sum <= daily_limit_slots, name=f"DailyLimit_Day_{d}")
                         print(f"  Constraint Day {d}: sum(Y[{day_start_slot}...{day_end_slot-1}]) <= {daily_limit_slots}")
@@ -380,7 +380,7 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                 final_total_stress = 0.0
                 scheduled_task_count = 0
                 message = f"Solver status: {gurobi_status_str}."
-                filtered_tasks_msg = f" {len(unschedulable_tasks_info)} tasks were filtered out before optimization due to the Pi<0.7 condition." if unschedulable_tasks_info else ""
+                filtered_tasks_msg = f" {len(unschedulable_tasks_info)} tasks were filtered out before optimization due to the Pi condition." if unschedulable_tasks_info else ""
 
                 if status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT]:
                     if m.SolCount > 0:
@@ -404,12 +404,14 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                                              continue
 
                                         start_dt = slot_to_datetime(start_slot)
+                                        # Calculate end time carefully to avoid crossing day boundary if not intended
                                         end_dt = start_dt + timedelta(minutes=dur_slots * 15)
                                         day_of_task = start_dt.date()
                                         day_end_limit = datetime.combine(day_of_task, datetime.min.time()).replace(hour=GRID_END_HOUR)
 
+                                        # Clamp end time to the grid end hour for that day if it exceeds it
                                         if end_dt > day_end_limit:
-                                            print(f"CRITICAL WARNING: Task {task_data['id']} (Start: {start_dt}, Duration: {dur_slots*15}m) calculated end time {end_dt} exceeds day limit {day_end_limit}. Clamping end time to {day_end_limit} for output. REVIEW CONSTRAINTS.")
+                                            print(f"WARNING: Task {task_data['id']} (Start: {start_dt}, Duration: {dur_slots*15}m) calculated end time {end_dt} exceeds day limit {day_end_limit}. Clamping end time to {day_end_limit} for output.")
                                             end_dt = day_end_limit
 
                                         record = {
@@ -418,7 +420,7 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                                             "priority": task_data["priority"],
                                             "difficulty": task_data["difficulty"],
                                             "start_slot": start_slot,
-                                            "end_slot": end_slot,
+                                            "end_slot": end_slot, # This end_slot might be misleading if clamped; startTime/endTime are more accurate
                                             "startTime": start_dt.isoformat(),
                                             "endTime": end_dt.isoformat(),
                                             "duration_min": dur_slots * 15,
@@ -427,18 +429,16 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                                         schedule_records.append(record)
                                         scheduled_task_indices_in_solver.add(i)
                                         task_scheduled_this_iter = True
-                                        break # Move to next task (i)
+                                        break # Move to next task (i) once start slot found
                                 except (AttributeError, gp.GurobiError) as e:
                                     print(f"Error accessing solution value for X[{i},{s}]: {e}")
-                                    continue # Try next slot for this task? Or break? Let's continue
+                                    continue
 
                         # Verify all schedulable tasks were indeed scheduled
                         scheduled_task_count = len(scheduled_task_indices_in_solver)
                         if scheduled_task_count != n_tasks:
-                             print(f"CRITICAL WARNING: Expected {n_tasks} schedulable tasks to be scheduled, but only found {scheduled_task_count} in the solution variables. Constraint 'TaskMustStart' might conflict with others, or solution reading error.")
-                             # If infeasible earlier, this part might not run anyway
-                             message += f" Warning: Mismatch in expected ({n_tasks}) vs found ({scheduled_task_count}) scheduled tasks."
-
+                             print(f"CRITICAL WARNING: Expected {n_tasks} schedulable tasks (set T) to be scheduled due to Constraint 6.1, but only found {scheduled_task_count} in the solution variables. Model might be infeasible or have conflicting constraints not caught earlier.")
+                             message += f" Warning: Mismatch in expected ({n_tasks}) vs found ({scheduled_task_count}) scheduled tasks (from T)."
 
                         schedule_records.sort(key=lambda x: x["start_slot"])
                         final_schedule = schedule_records
@@ -446,16 +446,17 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                         # Calculate total leisure from L_var values
                         final_total_leisure = gp.quicksum(L_var[s].X for s in range(TOTAL_SLOTS)).getValue()
 
-                        # Recalculate stress based on the actual scheduled tasks and their start slots
+                        # Recalculate stress based on the actual scheduled tasks
+                        # This sum should match the objective term if all tasks in T were scheduled
                         final_total_stress = gp.quicksum(X[i, s].X * (schedulable_tasks[i]["priority"] * schedulable_tasks[i]["difficulty"])
                                                          for i in range(n_tasks) for s in range(TOTAL_SLOTS)
                                                          if (i, s) in X and X[i,s].X > solution_threshold).getValue()
 
-                        print(f"Gurobi Solver: Scheduled {scheduled_task_count} tasks.")
+                        print(f"Gurobi Solver: Scheduled {scheduled_task_count} tasks (from set T).")
                         print(f"Gurobi Solver: Calculated Total Leisure = {final_total_leisure:.1f} minutes")
                         print(f"Gurobi Solver: Calculated Total Stress Score = {final_total_stress:.1f}")
 
-                        message = f"Successfully scheduled {scheduled_task_count} out of {original_task_count} tasks ({gurobi_status_str})." + filtered_tasks_msg
+                        message = f"Successfully scheduled {scheduled_task_count} tasks meeting the Pi condition ({gurobi_status_str}). Total original tasks: {original_task_count}." + filtered_tasks_msg
 
                     else: # Status indicated solution possible, but SolCount is 0
                         print(f"Gurobi Solver: Status is {gurobi_status_str} but no solution found (SolCount=0).")
@@ -464,18 +465,25 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                              message = "Time limit reached before a feasible solution could be found."
                         message += filtered_tasks_msg
 
-
                 elif status == GRB.INFEASIBLE:
                     print("Gurobi Solver: Model is infeasible.")
-                    message = "Could not find a feasible schedule for the tasks meeting the Pi>=0.7 condition. Check constraints: deadlines too tight? Too many commitments? Daily limits too strict? Hard task limits conflicting? Insufficient time for mandatory tasks?" + filtered_tasks_msg
-                    # Compute IIS (optional, uncomment if needed for debugging)
+                    message = "Could not find a feasible schedule for the tasks meeting the Pi condition. Check constraints: deadlines too tight? Too many commitments? Daily limits too strict? Hard task limits conflicting? Insufficient time slots available to schedule all mandatory (Pi-filtered) tasks?" + filtered_tasks_msg
+                    # Optional: Compute and print IIS for debugging
                     # try:
-                    #     print("Computing IIS...")
+                    #     print("Computing IIS to identify conflicting constraints...")
                     #     m.computeIIS()
-                    #     m.write("infeasible_model.ilp")
-                    #     print("Wrote IIS to infeasible_model.ilp")
+                    #     print("Infeasible constraints:")
+                    #     for c in m.getConstrs():
+                    #         if c.IISConstr: print(f"  {c.constrName}")
+                    #     for v in m.getVars():
+                    #          # Check lower, upper, and binary bounds
+                    #          if v.IISLB: print(f"  Variable {v.VarName} lower bound {v.LB} is part of IIS")
+                    #          if v.IISUB: print(f"  Variable {v.VarName} upper bound {v.UB} is part of IIS")
+                    #          if v.VType == GRB.BINARY and v.VarName.startswith('X') and v.X < 0.5 and v.X > -0.5: # Crude check if binary var involved
+                    #               pass # Harder to directly see binary conflict here
                     # except Exception as iis_e:
-                    #     print(f"Could not compute IIS: {iis_e}")
+                    #     print(f"Could not compute or print IIS: {iis_e}")
+
 
                 else: # Handle other Gurobi statuses
                      message = f"Solver finished with unhandled status: {gurobi_status_str}." + filtered_tasks_msg
@@ -487,19 +495,17 @@ def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, daily_limit_s
                     "status": gurobi_status_str,
                     "schedule": final_schedule,
                     "total_leisure": round(final_total_leisure, 1),
-                    "total_stress": round(final_total_stress, 1),
+                    "total_stress": round(final_total_stress, 1), # This is the sum(p*d*X) term from objective
                     "solve_time_seconds": round(solve_time, 2),
-                    "completion_rate": round(completion_rate, 2),
+                    "completion_rate": round(completion_rate, 2), # Ratio of scheduled tasks (from T) to original tasks (T_all)
                     "message": message,
-                    "filtered_tasks_info": unschedulable_tasks_info # Ensure this is returned
+                    "filtered_tasks_info": unschedulable_tasks_info # Contains reasons for filtering
                 }
 
     except gp.GurobiError as e:
         print(f"Gurobi Error code {e.errno}: {e}")
-        # Ensure filtered_tasks_info is included even on Gurobi error
         return {"status": "Error", "message": f"Gurobi Error: {e}", "filtered_tasks_info": unschedulable_tasks_info}
     except Exception as e:
         print(f"An unexpected error occurred during Gurobi optimization: {e}")
         print(traceback.format_exc())
-        # Ensure filtered_tasks_info is included even on unexpected error
         return {"status": "Error", "message": f"Unexpected error during optimization: {e}", "filtered_tasks_info": unschedulable_tasks_info}
