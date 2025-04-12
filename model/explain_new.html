@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Scheduler Logic Visualization (No Y Variable)</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                line-height: 1.6;
+                margin: 20px;
+            }
+            h1,
+            h2,
+            h3 {
+                border-bottom: 1px solid #ccc;
+                padding-bottom: 5px;
+                margin-top: 30px;
+            }
+            table {
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                width: 100%; /* Make table responsive */
+                table-layout: fixed; /* Prevent content from stretching columns */
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 4px; /* Reduced padding */
+                text-align: center;
+                font-size: 10px; /* Smaller font for slots */
+                word-wrap: break-word; /* Wrap long text */
+                vertical-align: top; /* Align text to top */
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .slot {
+                min-width: 30px; /* Ensure minimum width */
+                height: 40px; /* Slightly increased height */
+                position: relative; /* For potential overlay text */
+                background-color: #e6ffe6; /* Default: Available */
+            }
+            .slot-index {
+                font-weight: bold;
+                color: #555;
+                display: block; /* Put index on its own line */
+                margin-bottom: 2px;
+            }
+            .slot-time {
+                font-size: 9px;
+                color: #777;
+                display: block;
+            }
+            .slot-content {
+                font-size: 9px;
+                color: #333;
+                margin-top: 2px;
+            }
+            .variable-def {
+                 margin-bottom: 15px;
+            }
+            .variable-def strong {
+                 font-family: monospace;
+                 font-size: 1.1em;
+            }
+            .variable-def ul { margin-top: 5px; margin-bottom: 8px; }
+            .variable-def li { margin-bottom: 3px; }
+            .variable-def .example {
+                font-size: 0.9em;
+                margin-left: 20px;
+                padding-left: 10px;
+                border-left: 2px solid #eee;
+                font-style: italic;
+                color: #555;
+            }
+
+
+            /* --- Constraint Visualization Styles --- */
+            .committed {
+                background-color: #666; /* Dark grey */
+                color: white;
+            }
+            .task-occupied {
+                background-color: #add8e6; /* Light blue */
+            }
+            .disallowed-deadline {
+                background-color: #ffcccc; /* Light red */
+            }
+            .disallowed-preference {
+                background-color: #e0e0e0; /* Light grey */
+            }
+            .disallowed-commitment-start {
+                background-color: #ffd699; /* Light orange */
+            }
+            .disallowed-overlap-start {
+                background-color: #f0b3ff; /* Light purple */
+            }
+            .leisure-yes {
+                background-color: #aaffaa; /* Bright green */
+            }
+            .leisure-no {
+                background-color: #ffaaaa; /* Bright red */
+            }
+            .filtered-out {
+                background-color: #f5f5f5; /* Light grey background for filtered row */
+                color: #777;
+            }
+            .hard-task-day {
+                background-color: #ffe6e6; /* Light red background for hard task row */
+            }
+
+            .legend {
+                margin-bottom: 20px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                background-color: #f9f9f9;
+            }
+            .legend span {
+                display: inline-block;
+                width: 15px;
+                height: 15px;
+                margin-right: 5px;
+                vertical-align: middle;
+                border: 1px solid #555;
+            }
+            code {
+                background-color: #eee;
+                padding: 2px 4px;
+                border-radius: 3px;
+                font-family: monospace;
+            }
+            ul { margin-top: 5px; }
+            li { margin-bottom: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>Scheduler Logic Visualization (No Y Variable)</h1>
+
+        <p>
+            This page illustrates the task scheduling process using a model that directly uses task start variables (<code>X</code>) and leisure variables (<code>L</code>), without the auxiliary occupation variable (<code>Y</code>). It involves pre-filtering tasks, defining variables for the optimizer to decide, applying constraints to ensure a valid schedule, and finally optimizing based on an objective function. We often focus on
+            <strong>Day 0 (Today, 8am - 10pm)</strong> which corresponds to
+            global slots <strong>0 to 55</strong> within the full 7-day horizon (Slots 0-391).
+        </p>
+
+        <h2>Basic Time Slot Grid (Day 0: Slots 0-55)</h2>
+        <p>
+            Each cell represents a 15-minute slot. The top number is the global
+            slot index, the bottom is the start time. (Full horizon is 7 days,
+            slots 0-391).
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="12">Day 0 (Example: 8am - 11am)</th>
+                </tr>
+                <tr>
+                    <th>8:00</th><th>8:15</th><th>8:30</th><th>8:45</th>
+                    <th>9:00</th><th>9:15</th><th>9:30</th><th>9:45</th>
+                    <th>10:00</th><th>10:15</th><th>10:30</th><th>10:45</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <!-- 8:00 - 10:45 (Slots 0-11) -->
+                    <td class="slot" id="vis-base-0"><span class="slot-index">0</span><span class="slot-time">08:00</span></td>
+                    <td class="slot" id="vis-base-1"><span class="slot-index">1</span><span class="slot-time">08:15</span></td>
+                    <td class="slot" id="vis-base-2"><span class="slot-index">2</span><span class="slot-time">08:30</span></td>
+                    <td class="slot" id="vis-base-3"><span class="slot-index">3</span><span class="slot-time">08:45</span></td>
+                    <td class="slot" id="vis-base-4"><span class="slot-index">4</span><span class="slot-time">09:00</span></td>
+                    <td class="slot" id="vis-base-5"><span class="slot-index">5</span><span class="slot-time">09:15</span></td>
+                    <td class="slot" id="vis-base-6"><span class="slot-index">6</span><span class="slot-time">09:30</span></td>
+                    <td class="slot" id="vis-base-7"><span class="slot-index">7</span><span class="slot-time">09:45</span></td>
+                    <td class="slot" id="vis-base-8"><span class="slot-index">8</span><span class="slot-time">10:00</span></td>
+                    <td class="slot" id="vis-base-9"><span class="slot-index">9</span><span class="slot-time">10:15</span></td>
+                    <td class="slot" id="vis-base-10"><span class="slot-index">10</span><span class="slot-time">10:30</span></td>
+                    <td class="slot" id="vis-base-11"><span class="slot-index">11</span><span class="slot-time">10:45</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Step 1: Decision Variables</h2>
+        <p>The optimization model needs to decide the values of these variables to build the schedule. These variables are only defined for the tasks that pass the pre-filter (explained in Step 2, forming set <code>T</code>).</p>
+
+        <div class="variable-def">
+            <strong>X[i, s]</strong> (Binary Variable: 0 or 1)
+            <ul>
+                <li><strong>Meaning:</strong> <code>X[i, s] = 1</code> if schedulable task <code>i</code> (from set <code>T</code>) is chosen to <strong>start</strong> at global slot <code>s</code>. Otherwise, <code>X[i, s] = 0</code>.</li>
+                <li><strong>Interpretation:</strong> After the solver finishes, for each schedulable task <code>i</code>, we look for the *single* slot <code>s</code> where <code>X[i, s]</code> equals 1. This tells us the exact start time for task <code>i</code> in the generated schedule. All other <code>X[i, s']</code> for <code>s' != s</code> will be 0 for that task <code>i</code>.</li>
+            </ul>
+             <p class="example"><strong>Example:</strong> Suppose Task 'A' (schedulable, duration 2 slots) starts at slot 5. The model sets <code>X['A', 5] = 1</code>. For all other slots <code>s'</code> (0, 1, 2, 3, 4, 6, ...), <code>X['A', s'] = 0</code>.</p>
+        </div>
+
+        <div class="variable-def">
+            <strong>L[s]</strong> (Continuous Variable: 0 to 15)
+            <ul>
+                <li><strong>Meaning:</strong> <code>L[s]</code> represents the amount of <strong>leisure time</strong> (in minutes) allocated to global slot <code>s</code>.</li>
+                 <li><strong>Relationship:</strong> Its value depends on commitments and whether the slot is occupied by a task (determined directly from <code>X[i, s]</code> values). If slot <code>s</code> is committed, <code>L[s]</code> must be 0. If slot <code>s</code> is occupied by a task (meaning some <code>X[i, start]=1</code> such that <code>start <= s < start + dur_i</code>), <code>L[s]</code> must be 0. If slot <code>s</code> is neither committed nor occupied, then <code>L[s]</code> can be up to 15.</li>
+                <li><strong>Interpretation:</strong> After solving, if <code>L[s] = 15</code>, it means slot <code>s</code> is designated as free leisure time. If <code>L[s] = 0</code>, it means the slot is either used by a scheduled task or is blocked by a commitment. The objective function (Step 4) tries to maximize the sum of all <code>L[s]</code> values.</li>
+            </ul>
+            <p class="example"><strong>Example:</strong> Slot 8 is not committed. If no task is scheduled to occupy slot 8 (i.e., no <code>X[i, start]=1</code> results in slot 8 being covered), the solver will likely set <code>L[8] = 15</code> to maximize the objective. If slot 9 is occupied by Task 'B' (e.g., <code>X['B', 8]=1</code> and duration >= 2), then <code>L[9]</code> must be 0. If slot 10 is committed (e.g., a meeting), then <code>L[10]</code> must be 0, regardless of task occupation.</p>
+        </div>
+
+        <h2>Step 2: Task Pre-filtering (Pi Condition)</h2>
+        <p>
+            <strong>Intuition:</strong> Before scheduling, tasks are evaluated
+            to see if they provide sufficient duration relative to their
+            combined difficulty and priority. Tasks that are deemed too short for
+            their "importance" are filtered out. This defines the set of tasks <code>T</code> that *must* be scheduled, for which the decision variables (<code>X</code>, <code>L</code>) are then considered.
+        </p>
+        <p>
+            <strong>Model:</strong> A task <code>i</code> is kept for scheduling
+            (added to set <code>T</code>) only if
+            <code>Duration_min(i) >= (Difficulty(i) * Priority(i)) * ln(10/3)</code>.
+            The constant <code>ln(10/3) ≈ 1.204</code>.
+        </p>
+        <p><strong>Examples:</strong></p>
+        <ul>
+            <li>
+                Task X: Dur=60min, Diff=3, Prio=4. Required = (3*4)*1.204 = 14.45 min.
+                Since 60 >= 14.45, Task X is <strong>schedulable</strong> (in set <code>T</code>).
+            </li>
+            <li>
+                Task Y: Dur=15min, Diff=5, Prio=3. Required = (5*3)*1.204 = 18.06 min.
+                Since 15 < 18.06, Task Y is <strong>filtered out</strong> (not in set <code>T</code>).
+            </li>
+             <li>
+                Task Z: Dur=30min, Diff=2, Prio=2. Required = (2*2)*1.204 = 4.82 min.
+                Since 30 >= 4.82, Task Z is <strong>schedulable</strong> (in set <code>T</code>).
+            </li>
+             <li>
+                Task W: Dur=90min, Diff=10, Prio=8. Required = (10*8)*1.204 = 96.32 min.
+                Since 90 < 96.32, Task W is <strong>filtered out</strong> (not in set <code>T</code>).
+            </li>
+        </ul>
+        <p><strong>Visualization (Example Task List):</strong></p>
+         <div class="legend">
+             <strong>Task Table Legend:</strong><br />
+             <span style="background-color: #f5f5f5"></span> Task Filtered Out (Pi Condition) &nbsp;
+             <span style="background-color: #ffe6e6"></span> Hard Task (Difficulty >= Threshold) &nbsp;
+             <span style="background-color: #aaffaa"></span> Schedulable (Included in Set T) &nbsp;
+             <span style="background-color: #ffaaaa"></span> Not Schedulable (Filtered Out) &nbsp;
+         </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Task</th><th>Duration (min)</th><th>Difficulty</th><th>Priority</th><th>Required Min Duration</th><th>Schedulable? (In Set T?)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>Task X</td><td>60</td><td>3</td><td>4</td><td>~15 min</td><td style="background-color: #aaffaa">Yes</td></tr>
+                <tr class="filtered-out"><td>Task Y</td><td>15</td><td>5</td><td>3</td><td>~19 min</td><td style="background-color: #ffaaaa">No</td></tr>
+                <tr><td>Task Z</td><td>30</td><td>2</td><td>2</td><td>~5 min</td><td style="background-color: #aaffaa">Yes</td></tr>
+                <tr class="filtered-out"><td>Task W</td><td>90</td><td>10</td><td>8</td><td>~97 min</td><td style="background-color: #ffaaaa">No</td></tr>
+            </tbody>
+        </table>
+        <p>The subsequent optimization only considers tasks marked "Yes" (Set <code>T</code> = {Task X, Task Z} in this example).</p>
+
+
+        <h2>Step 3: Optimization Constraints (Applied using variables for tasks in Set <code>T</code>)</h2>
+        <p>These rules restrict the possible values of the decision variables <code>X</code> and <code>L</code> for the tasks that passed the pre-filter (set <code>T</code>).</p>
+
+        <!-- Constraint (a): Mandatory Task Assignment (LaTeX 6.1) -->
+        <h3>(a) Mandatory Task Assignment</h3>
+        <p>
+            <strong>Intuition:</strong> Every task that passed the Pi pre-filter
+            (i.e., is in set <code>T</code>) must be scheduled exactly once.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum(X[i, s] for s in all_slots) = 1</code> for each task <code>i</code> in <code>T</code>.
+        </p>
+        <p>
+            <strong>Implication:</strong> This ensures the final schedule includes one start time (one <code>X[i, s] = 1</code>) for every task deemed "schedulable" in Step 2. If it's impossible to fit all schedulable tasks due to
+            other constraints (like limited time, tight deadlines, commitments), the model will report **infeasibility**.
+        </p>
+        <p><strong>Examples:</strong></p>
+         <ul>
+            <li>If Task X and Task Z (from above) are the only schedulable tasks, the solver *must* find a start time (an `s` where `X[X, s]=1` and an `s'` where `X[Z, s']=1`) that respects all other rules.</li>
+            <li>Imagine 10 tasks pass the Pi filter, but after accounting for commitments, there are only enough free slots to schedule 9 of them without overlap. This constraint would force the solver to try fitting the 10th task, fail, and report "Infeasible". It doesn't drop tasks from set T once defined.</li>
+        </ul>
+
+        <!-- Constraint (b): Hard Task Limitation (LaTeX 6.2) -->
+        <h3>(b) Hard Task Limitation</h3>
+        <p>
+            <strong>Intuition:</strong> Schedule at most one "hard" task
+            (difficulty >= threshold, e.g., 4) per day among the schedulable
+            tasks to prevent overwhelm. This applies to the *start* time.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum(X[i, s] for i in T_hard for s in day_d_slots) <= 1</code>
+            for each day <code>d</code>, where <code>T_hard</code> includes only
+            tasks from set <code>T</code> (schedulable tasks) with difficulty at or above the threshold.
+        </p>
+        <p><strong>Examples (Hard Threshold = 4):</strong></p>
+        <ul>
+            <li>
+                Task C (Diff=4, Schedulable) and Task D (Diff=5, Schedulable) are both hard. If Task C is scheduled to start on Day 1 (<code>X[C, s]=1</code> for some <code>s</code> on Day 1), then Task D cannot also start on Day 1 (<code>X[D, s']=0</code> for all <code>s'</code> on Day 1). It must start on a different day (e.g., Day 0 or Day 2).
+            </li>
+             <li>
+                Task B (Diff=4, Filtered Out) and Task C (Diff=4, Schedulable). Task B is ignored by this constraint because it's not in set <code>T</code>. Task C (hard and schedulable) *can* be scheduled to start on Day 1.
+            </li>
+             <li>
+                Task C (Diff=4, Schedulable) and Task E (Diff=1, Schedulable). Task C (hard) starts on Day 1. Task E (not hard) can also be scheduled to start on Day 1, as it doesn't count towards the limit of hard task *starts*.
+            </li>
+        </ul>
+        <p><strong>Visualization (Hard Task Distribution):</strong></p>
+         <div class="legend">
+              <strong>Task Table Legend:</strong><br />
+             <span style="background-color: #f5f5f5"></span> Task Filtered Out (Pi Condition) &nbsp;
+             <span style="background-color: #ffe6e6"></span> Hard Task (Difficulty >= Threshold) &nbsp;
+         </div>
+        <table>
+            <thead><tr><th>Task</th><th>Difficulty</th><th>Schedulable?</th><th>Hard? (>=4)</th><th>Scheduled Start Day (Example)</th></tr></thead>
+            <tbody>
+                <tr><td>Task A</td><td>3</td><td>Yes</td><td>No</td><td>Day 0</td></tr>
+                <tr class="filtered-out"><td>Task B</td><td>4</td><td>No</td><td>Yes</td><td>N/A (Filtered)</td></tr>
+                <tr class="hard-task-day"><td>Task C</td><td>4</td><td>Yes</td><td>Yes</td><td>Day 1</td></tr>
+                <tr class="hard-task-day"><td>Task D</td><td>5</td><td>Yes</td><td>Yes</td><td>Day 2 (Cannot be Day 1)</td></tr>
+                <tr><td>Task E</td><td>1</td><td>Yes</td><td>No</td><td>Day 1 (Can share day with hard task C)</td></tr>
+            </tbody>
+        </table>
+        <p style="font-weight: bold">Only schedulable hard tasks (C, D) are subject to the one-per-day start limit. Filtered hard tasks (B) don't count. Non-hard tasks (A, E) can share days with hard tasks.</p>
+
+        <!-- Constraint (c): Deadlines & Horizon (LaTeX 6.3) -->
+        <h3>(c) Deadlines & Horizon</h3>
+        <p>
+            <strong>Intuition:</strong> Schedulable tasks must finish by their
+            deadline and fit entirely within the 7-day window (slots 0-391).
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> for task
+            <code>i</code> in <code>T</code> if starting at slot
+            <code>s</code> means its last slot (<code>s + dur_i - 1</code>) is
+            after its deadline slot (<code>dl_i</code>), OR if the task extends
+            beyond the horizon (<code>s + dur_i > TOTAL_SLOTS = 392</code>).
+        </p>
+        <p><strong>Examples:</strong></p>
+        <ul>
+            <li>
+                <strong>Deadline:</strong> Schedulable Task A (duration 4 slots = 60 min, deadline slot <code>dl_A = 6</code>, which is 9:45 AM).
+                <ul>
+                    <li>Start at <code>s=3</code> (8:45 AM): Occupies 3, 4, 5, 6. Last slot is 6. OK (<code>6 <= 6</code>). Allowed: <code>X[A, 3]</code> could be 1.</li>
+                    <li>Start at <code>s=4</code> (9:00 AM): Occupies 4, 5, 6, 7. Last slot is 7. VIOLATES deadline (<code>7 > 6</code>). Forbidden: <code>X[A, 4]</code> must be 0.</li>
+                </ul>
+            </li>
+             <li>
+                <strong>Horizon:</strong> Schedulable Task F (duration 5 slots = 75 min). Total slots = 392 (index 0 to 391).
+                <ul>
+                     <li>Start at <code>s=387</code>: Occupies 387, 388, 389, 390, 391. Last slot is 391. OK (<code>387 + 5 <= 392</code>). Allowed: <code>X[F, 387]</code> could be 1.</li>
+                     <li>Start at <code>s=388</code>: Occupies 388, 389, 390, 391, 392. Last slot would be 392. VIOLATES horizon (<code>388 + 5 > 392</code>). Forbidden: <code>X[F, 388]</code> must be 0.</li>
+                </ul>
+            </li>
+             <li>
+                <strong>Tight Deadline:</strong> Task G (duration 2 slots = 30 min, deadline slot <code>dl_G = 1</code>, which is 8:30 AM).
+                 <ul>
+                    <li>Start at <code>s=0</code> (8:00 AM): Occupies 0, 1. Last slot is 1. OK (<code>1 <= 1</code>). Allowed: <code>X[G, 0]</code> could be 1.</li>
+                    <li>Start at <code>s=1</code> (8:15 AM): Occupies 1, 2. Last slot is 2. VIOLATES deadline (<code>2 > 1</code>). Forbidden: <code>X[G, 1]</code> must be 0.</li>
+                </ul>
+            </li>
+        </ul>
+        <p><strong>Visualization (Task A: dur=4, dl=6):</strong></p>
+        <div class="legend"><span style="background-color: #ffcccc"></span> Potential START slot disallowed by deadline/horizon for the specific task.</div>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot" title="Task A (dur=4, dl=6) CAN start here (ends slot 6)"><span class="slot-index">3</span><span class="slot-time">08:45</span><span class="slot-content">OK Start</span></td>
+                    <td class="slot disallowed-deadline" title="Task A (dur=4, dl=6) cannot START here (would end slot 7)"><span class="slot-index">4</span><span class="slot-time">09:00</span><span class="slot-content">Deadline Fail</span></td>
+                    <td class="slot disallowed-deadline" title="Task A (dur=4, dl=6) cannot START here (would end slot 8)"><span class="slot-index">5</span><span class="slot-time">09:15</span><span class="slot-content">Deadline Fail</span></td>
+                    <td class="slot disallowed-deadline" title="Task A (dur=4, dl=6) cannot START here (would end slot 9)"><span class="slot-index">6</span><span class="slot-time">09:30</span><span class="slot-content">Deadline Fail</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Constraint (d): No Overlap (LaTeX 6.4) -->
+        <h3>(d) No Overlap</h3>
+        <p>
+            <strong>Intuition:</strong> Only one scheduled task (from set
+            <code>T</code>) can be active in any given time slot. Tasks can start immediately after another finishes.
+        </p>
+        <p>
+            <strong>Model:</strong> For any slot <code>t</code>, the sum of
+            <code>X[i, s]</code> for all tasks <code>i</code> in
+            <code>T</code> that would be *active* during slot
+            <code>t</code> (i.e., started at an <code>s</code> such that
+            <code>s <= t < s + dur_i</code>) must be <= 1.
+        </p>
+        <p>
+            <strong>Implication:</strong> This constraint directly uses the task start variables <code>X</code> to ensure mutual exclusivity. If Task B is scheduled to start at slot 5 and has duration 3 (occupying {5, 6, 7}), then for slot 6, the sum must consider <code>X[B, 5]</code> (which is 1) and any other task <code>C</code> that might start at slot 6 (<code>X[C, 6]</code>) or earlier such that it covers slot 6. The constraint forces that the sum of these relevant <code>X</code> variables for slot 6 cannot exceed 1.
+        </p>
+        <p><strong>Examples:</strong></p>
+        <ul>
+            <li>
+                Task B (dur=3) is scheduled to start at <code>s=5</code> (occupies 5, 6, 7, so <code>X[B, 5]=1</code>). Task C (dur=2).
+                <ul>
+                    <li>Consider slot <code>t=6</code>: The relevant starts are <code>s=6</code> (for Task C), <code>s=5</code> (for Task C, and for Task B), <code>s=4</code> (for Task C). The constraint ensures <code>X[B, 5] + X[C, 5] + X[C, 6] <= 1</code> (plus any other tasks active at t=6). Since <code>X[B, 5]=1</code>, this forces <code>X[C, 5]=0</code> and <code>X[C, 6]=0</code>. Task C cannot start at <code>s=6</code>.</li>
+                    <li>Consider slot <code>t=7</code>: The constraint ensures <code>X[B, 5] + X[C, 6] + X[C, 7] <= 1</code>. Since <code>X[B, 5]=1</code>, this forces <code>X[C, 6]=0</code> and <code>X[C, 7]=0</code>. Task C cannot start at <code>s=7</code>.</li>
+                    <li>Consider slot <code>t=8</code>: Task B is finished. Task C *can* start at <code>s=8</code> (occupies 8, 9), as the constraint for <code>t=8</code> would involve <code>X[C, 7] + X[C, 8]</code> (and potentially others, but not Task B), which can be satisfied with <code>X[C, 8]=1</code>.</li>
+                </ul>
+            </li>
+            <li>
+                 Task J (dur=2, start=1), Task K (dur=2, start=3), Task L (dur=2).
+                 <ul>
+                     <li>Task J occupies {1, 2}. Task K occupies {3, 4}.</li>
+                     <li>Can Task L start at <code>s=2</code>? It would occupy {2, 3}.
+                         <ul>
+                            <li>Check slot <code>t=2</code>: Active tasks are J (started at 1) and L (if started at 2). Constraint: <code>X[J, 1] + X[L, 2] <= 1</code>. Since <code>X[J, 1]=1</code>, this forces <code>X[L, 2]=0</code>.</li>
+                            <li>Check slot <code>t=3</code>: Active tasks are K (started at 3) and L (if started at 2). Constraint: <code>X[K, 3] + X[L, 2] <= 1</code>. This *would* allow <code>X[L, 2]=1</code> if K isn't started at 3, but the check for t=2 already forbade it.</li>
+                        </ul>
+                         Therefore, Task L cannot start at <code>s=2</code>. Forbidden: <code>X[L, 2]=0</code>.
+                     </li>
+                 </ul>
+            </li>
+        </ul>
+        <p><strong>Visualization (If Task B starts at 5):</strong></p>
+        <div class="legend">
+            <span style="background-color: #add8e6"></span> Slot occupied by Task B. &nbsp;
+            <span style="background-color: #f0b3ff"></span> Potential START slot for Task C invalidated because it would overlap with Task B.
+        </div>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot"><span class="slot-index">4</span><span class="slot-time">09:00</span></td>
+                    <td class="slot task-occupied" title="Task B occupies"><span class="slot-index">5</span><span class="slot-time">09:15</span><span class="slot-content">Task B</span></td>
+                    <td class="slot task-occupied disallowed-overlap-start" title="Task B occupies. Task C (dur=2) cannot start here (overlap 6,7)."><span class="slot-index">6</span><span class="slot-time">09:30</span><span class="slot-content">Task B</span></td>
+                    <td class="slot task-occupied disallowed-overlap-start" title="Task B occupies. Task C (dur=2) cannot start here (overlap 7)."><span class="slot-index">7</span><span class="slot-time">09:45</span><span class="slot-content">Task B</span></td>
+                    <td class="slot" title="Task C (dur=2) COULD start here (occupies 8, 9)"><span class="slot-index">8</span><span class="slot-time">10:00</span><span class="slot-content">OK Start C</span></td>
+                     <td class="slot"><span class="slot-index">9</span><span class="slot-time">10:15</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Constraint (e): Preferences (LaTeX 6.5) -->
+        <h3>(e) Preferences</h3>
+        <p>
+            <strong>Intuition:</strong> Schedulable tasks (from set
+            <code>T</code>) should start only within their preferred time
+            windows (morning: 8am-12pm, afternoon: 12pm-4pm, evening: 4pm-10pm, or any).
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> if slot
+            <code>s</code> is not in the <code>AllowedSlots_i</code> set for
+            task <code>i</code>'s preference. (Morning slots 0-15, Afternoon 16-31, Evening 32-55 per day).
+        </p>
+        <p><strong>Examples (Day 0 Slots):</strong></p>
+        <ul>
+            <li>Task D has preference "morning". Cannot start at <code>s=16</code> (12:00 PM) or later on Day 0. Forbidden: <code>X[D, 16]=0</code>, <code>X[D, 32]=0</code> etc. Can start at <code>s=15</code> (11:45 AM). Allowed: <code>X[D, 15]</code> could be 1.</li>
+            <li>Task M has preference "afternoon". Cannot start at <code>s=15</code> (11:45 AM) or earlier. Cannot start at <code>s=32</code> (4:00 PM) or later. Forbidden: <code>X[M, 15]=0</code>, <code>X[M, 32]=0</code>. Can start at <code>s=16</code> (12:00 PM) or <code>s=31</code> (3:45 PM). Allowed: <code>X[M, 16]</code> could be 1.</li>
+             <li>Task N has preference "evening". Cannot start at <code>s=31</code> (3:45 PM) or earlier. Forbidden: <code>X[N, 31]=0</code>. Can start at <code>s=32</code> (4:00 PM) or <code>s=55</code> (9:45 PM, assuming duration allows). Allowed: <code>X[N, 32]</code> could be 1.</li>
+             <li>Task P has preference "any". Can start in any slot <code>s</code> (0-391), subject to other constraints. No slots are disallowed by *this* constraint.</li>
+        </ul>
+        <p><strong>Visualization (Task D: Morning pref, Task M: Afternoon pref):</strong></p>
+         <div class="legend"><span style="background-color: #e0e0e0"></span> Potential START slot disallowed by preference for the specific task being considered (color indicates 'disallowed' for *at least one* task shown).</div>
+        <table>
+            <tbody>
+                <tr> <!-- Slots 14-19 (around noon) -->
+                     <td class="slot" title="Task D (Morning) can start. Task M (Afternoon) cannot."><span class="slot-index">14</span><span class="slot-time">11:30</span><span class="slot-content">D:OK, M:No</span></td>
+                     <td class="slot" title="Task D (Morning) can start. Task M (Afternoon) cannot."><span class="slot-index">15</span><span class="slot-time">11:45</span><span class="slot-content">D:OK, M:No</span></td>
+                    <td class="slot disallowed-preference" title="Task D (Morning) cannot start. Task M (Afternoon) can start."><span class="slot-index">16</span><span class="slot-time">12:00</span><span class="slot-content">D:No, M:OK</span></td>
+                    <td class="slot disallowed-preference" title="Task D (Morning) cannot start. Task M (Afternoon) can start."><span class="slot-index">17</span><span class="slot-time">12:15</span><span class="slot-content">D:No, M:OK</span></td>
+                    <td class="slot disallowed-preference" title="Task D (Morning) cannot start. Task M (Afternoon) can start."><span class="slot-index">18</span><span class="slot-time">12:30</span><span class="slot-content">D:No, M:OK</span></td>
+                    <td class="slot disallowed-preference" title="Task D (Morning) cannot start. Task M (Afternoon) can start."><span class="slot-index">19</span><span class="slot-time">12:45</span><span class="slot-content">D:No, M:OK</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Constraint (f): Commitments (LaTeX 6.6) -->
+        <h3>(f) Commitments</h3>
+        <p>
+            <strong>Intuition:</strong> Scheduled tasks (from set
+            <code>T</code>) cannot overlap with pre-existing fixed commitments (e.g., meetings, appointments).
+        </p>
+        <p>
+            <strong>Model:</strong> <code>X[i, s] = 0</code> if the set of slots
+            task <code>i</code> in <code>T</code> would occupy starting at
+            <code>s</code> (i.e., <code>{s, s+1, ..., s + dur_i - 1}</code>) has
+            any intersection with the set of committed slots <code>C</code>.
+        </p>
+        <p><strong>Examples:</strong></p>
+        <ul>
+            <li>
+                <strong>Single Slot Commitment:</strong> Commitment at <code>s=10</code>. Task E (dur=3).
+                <ul>
+                    <li>Start at <code>s=7</code>: Occupies {7, 8, 9}. No overlap. Allowed: <code>X[E, 7]</code> could be 1.</li>
+                    <li>Start at <code>s=8</code>: Occupies {8, 9, 10}. Overlaps slot 10. Forbidden: <code>X[E, 8]=0</code>.</li>
+                    <li>Start at <code>s=9</code>: Occupies {9, 10, 11}. Overlaps slot 10. Forbidden: <code>X[E, 9]=0</code>.</li>
+                    <li>Start at <code>s=10</code>: Occupies {10, 11, 12}. Overlaps slot 10. Forbidden: <code>X[E, 10]=0</code>.</li>
+                    <li>Start at <code>s=11</code>: Occupies {11, 12, 13}. No overlap. Allowed: <code>X[E, 11]</code> could be 1.</li>
+                </ul>
+            </li>
+             <li>
+                 <strong>Multi-Slot Commitment:</strong> Commitments at <code>s=12, 13</code>. Task Q (dur=2).
+                 <ul>
+                     <li>Start at <code>s=10</code>: Occupies {10, 11}. No overlap. Allowed: <code>X[Q, 10]</code> could be 1.</li>
+                     <li>Start at <code>s=11</code>: Occupies {11, 12}. Overlaps slot 12. Forbidden: <code>X[Q, 11]=0</code>.</li>
+                     <li>Start at <code>s=12</code>: Occupies {12, 13}. Overlaps slots 12, 13. Forbidden: <code>X[Q, 12]=0</code>.</li>
+                     <li>Start at <code>s=13</code>: Occupies {13, 14}. Overlaps slot 13. Forbidden: <code>X[Q, 13]=0</code>.</li>
+                      <li>Start at <code>s=14</code>: Occupies {14, 15}. No overlap. Allowed: <code>X[Q, 14]</code> could be 1.</li>
+                 </ul>
+            </li>
+        </ul>
+        <p><strong>Visualization (Commitment at slot 10):</strong></p>
+        <div class="legend">
+            <span style="background-color: #666"></span> Committed Slot. &nbsp;
+            <span style="background-color: #ffd699"></span> Potential START slot disallowed because the task would overlap the commitment.
+        </div>
+        <table>
+            <tbody>
+                <tr>
+                    <td class="slot" title="Task E (dur=3) can START here (occupies 7,8,9)"><span class="slot-index">7</span><span class="slot-time">09:45</span><span class="slot-content">OK Start</span></td>
+                    <td class="slot disallowed-commitment-start" title="Task E (dur=3) cannot START here (occupies 8,9,10 - conflicts slot 10)"><span class="slot-index">8</span><span class="slot-time">10:00</span><span class="slot-content">Commit Fail</span></td>
+                    <td class="slot disallowed-commitment-start" title="Task E (dur=3) cannot START here (occupies 9,10,11 - conflicts slot 10)"><span class="slot-index">9</span><span class="slot-time">10:15</span><span class="slot-content">Commit Fail</span></td>
+                    <td class="slot committed disallowed-commitment-start" title="Commitment here. Task E (dur=3) cannot START here (occupies 10,11,12 - conflicts slot 10)"><span class="slot-index">10</span><span class="slot-time">10:30</span><span class="slot-content">Commit</span></td>
+                    <td class="slot" title="Task E (dur=3) can START here (occupies 11,12,13)"><span class="slot-index">11</span><span class="slot-time">10:45</span><span class="slot-content">OK Start</span></td>
+                     <td class="slot"><span class="slot-index">12</span><span class="slot-time">11:00</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Constraint (g): Leisure Calculation (LaTeX 6.7 - No Y) -->
+        <h3>(g) Leisure Calculation</h3>
+        <p>
+            <strong>Intuition:</strong> Leisure time (15 mins per slot) exists
+            only in slots that are NOT committed AND NOT occupied by a scheduled
+            task (from set <code>T</code>). Task occupation is determined directly from the <code>X</code> variables.
+        </p>
+        <p>
+            <strong>Model:</strong> Leisure <code>L[s]</code> is calculated:
+            <ul>
+                <li><code>L[s] = 0</code> if slot <code>s</code> is committed.</li>
+                <li>Otherwise (if not committed), <code>L[s] <= 15 * (1 - Sum(X[i, start] for all i, start where task i starting at 'start' covers slot s))</code>.</li>
+            </ul>
+        </p>
+        <p>
+            <strong>Implication:</strong> The sum <code>Sum(X[i, start]...)</code> calculates whether slot <code>s</code> is occupied. Because the "No Overlap" constraint (d) ensures this sum is at most 1, the sum will be exactly 1 if slot <code>s</code> is occupied by a task from T, and 0 otherwise.
+            The constraint then forces <code>L[s]</code> to 0 if the slot is occupied (sum=1), and allows <code>L[s]</code> up to 15 if the slot is free (sum=0) and not committed. The objective function maximizing total leisure pushes <code>L[s]</code> to 15 whenever possible.
+        </p>
+        <p><strong>Examples (Final state after scheduling):</strong></p>
+        <ul>
+            <li>Slot 20: Not committed, no task occupies it (Occupation sum = 0). Result: <code>L[20]=15</code>.</li>
+            <li>Slot 21: Has a commitment. Result: <code>L[21]=0</code>.</li>
+            <li>Slot 22: Occupied by Task F (from T). (Occupation sum = 1). Result: <code>L[22]=0</code>.</li>
+             <li>Slot 23: Not committed, no task occupies it (Occupation sum = 0). Result: <code>L[23]=15</code>.</li>
+        </ul>
+        <p>
+            <strong>Visualization (Example Slot Statuses after solving):</strong>
+        </p>
+         <div class="legend">
+             <span style="background-color: #aaffaa"></span> Leisure = 15 min (Slot is free). &nbsp;
+             <span style="background-color: #ffaaaa"></span> Leisure = 0 min (Slot is committed or task-occupied). &nbsp;
+             <span style="background-color: #666"></span> Committed Slot. &nbsp;
+             <span style="background-color: #add8e6"></span> Task Occupied Slot.
+         </div>
+        <table>
+            <tbody>
+                <tr> <!-- Slots 20-23 (around 1pm) -->
+                    <td class="slot leisure-yes" title="Not committed, not occupied -> Leisure=15"><span class="slot-index">20</span><span class="slot-time">13:00</span><span class="slot-content">Leisure=15</span></td>
+                    <td class="slot committed leisure-no" title="Committed -> Leisure=0"><span class="slot-index">21</span><span class="slot-time">13:15</span><span class="slot-content">Commit<br>Leisure=0</span></td>
+                    <td class="slot task-occupied leisure-no" title="Task F Occupied -> Leisure=0"><span class="slot-index">22</span><span class="slot-time">13:30</span><span class="slot-content">Task F<br>Leisure=0</span></td>
+                    <td class="slot leisure-yes" title="Not committed, not occupied -> Leisure=15"><span class="slot-index">23</span><span class="slot-time">13:45</span><span class="slot-content">Leisure=15</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Constraint (h): Daily Limits (LaTeX 6.8 - No Y) -->
+        <h3>(h) Daily Limits (Optional)</h3>
+        <p>
+            <strong>Intuition:</strong> Limit the total number of slots occupied by tasks (from set <code>T</code>) per day. This is *not* about number of tasks started, but total busy time from scheduled tasks, calculated directly from <code>X</code> variables.
+        </p>
+        <p>
+            <strong>Model:</strong>
+            <code>Sum( X[i, start] * SlotsInDay(start, dur_i, d) for i in T, all start slots ) <= Limit_daily</code> for each day <code>d</code>.
+            Here, <code>SlotsInDay(start, dur_i, d)</code> calculates how many slots of task <code>i</code> (if it starts at <code>start</code>) actually fall within day <code>d</code>.
+        </p>
+        <p>
+            <strong>Implication:</strong> This constraint sums up the daily contribution of each scheduled task. If a task starts on Day 0 but runs into Day 1, only the slots occupied *on* Day 0 count towards Day 0's limit, and the slots occupied *on* Day 1 count towards Day 1's limit.
+        </p>
+        <p><strong>Examples (Day 0):</strong></p>
+        <ul>
+            <li>
+                <strong>Limit Violation:</strong> Daily Limit = 6 slots (1.5 hours). Schedule Task G (dur=4, start=2) and Task H (dur=3, start=7).
+                <ul>
+                    <li>Task G (start=2, dur=4) contributes 4 slots to Day 0. (<code>X[G, 2]=1</code> * 4 slots).</li>
+                    <li>Task H (start=7, dur=3) contributes 3 slots to Day 0. (<code>X[H, 7]=1</code> * 3 slots).</li>
+                    <li>Total contribution to Day 0 limit = 1*4 + 1*3 = 7 slots.</li>
+                    <li>Violates the limit (7 > 6). This combination is invalid. Solver must find another schedule.</li>
+                </ul>
+            </li>
+             <li>
+                 <strong>Limit Met:</strong> Daily Limit = 6 slots. Schedule Task G (dur=4, start=2) and Task I (dur=2, start=8).
+                 <ul>
+                    <li>Task G contributes 4 slots to Day 0.</li>
+                    <li>Task I contributes 2 slots to Day 0.</li>
+                    <li>Total contribution = 1*4 + 1*2 = 6 slots.</li>
+                    <li>OK (<code>6 <= 6</code>). This schedule is valid regarding the daily limit.</li>
+                 </ul>
+             </li>
+             <li>
+                 <strong>Single Long Task Crossing Day Boundary:</strong> Daily Limit = 40 slots (10 hours) for Day 0. Schedule Task K (dur=60 slots = 15 hours, start=40). Day 0 ends at slot 55.
+                  <ul>
+                    <li>Task K starts at slot 40 (Day 0). Slots occupied: {40, ..., 99}.</li>
+                    <li>Slots within Day 0 (d=0, slots 0-55): {40, 41, ..., 55}. Count = 55 - 40 + 1 = 16 slots.</li>
+                    <li>Contribution to Day 0 limit = <code>X[K, 40] * SlotsInDay(40, 60, 0) = 1 * 16 = 16</code> slots.</li>
+                    <li>OK for Day 0 (<code>16 <= 40</code>). (The remaining 44 slots would count towards Day 1's limit).</li>
+                 </ul>
+             </li>
+        </ul>
+        <p><strong>Visualization (Limit = 6 slots, Violation Example - slots occupied):</strong></p>
+        <div class="legend">
+             <span style="background-color: #add8e6"></span> Task Occupied Slot. &nbsp;
+             <span style="background-color: #e6ffe6"></span> Available Slot.
+        </div>
+        <table>
+            <tbody>
+                <tr> <!-- Showing slots 1-10 on Day 0 -->
+                    <td class="slot"><span class="slot-index">1</span><span class="slot-time">08:15</span></td>
+                    <td class="slot task-occupied" title="Task G"><span class="slot-index">2</span><span class="slot-time">08:30</span><span class="slot-content">G</span></td>
+                    <td class="slot task-occupied" title="Task G"><span class="slot-index">3</span><span class="slot-time">08:45</span><span class="slot-content">G</span></td>
+                    <td class="slot task-occupied" title="Task G"><span class="slot-index">4</span><span class="slot-time">09:00</span><span class="slot-content">G</span></td>
+                    <td class="slot task-occupied" title="Task G"><span class="slot-index">5</span><span class="slot-time">09:15</span><span class="slot-content">G</span></td>
+                    <td class="slot"><span class="slot-index">6</span><span class="slot-time">09:30</span></td>
+                    <td class="slot task-occupied" title="Task H"><span class="slot-index">7</span><span class="slot-time">09:45</span><span class="slot-content">H</span></td>
+                    <td class="slot task-occupied" title="Task H"><span class="slot-index">8</span><span class="slot-time">10:00</span><span class="slot-content">H</span></td>
+                    <td class="slot task-occupied" title="Task H"><span class="slot-index">9</span><span class="slot-time">10:15</span><span class="slot-content">H</span></td>
+                    <td class="slot"><span class="slot-index">10</span><span class="slot-time">10:30</span></td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="color: red; font-weight: bold">
+            VIOLATION (if Limit=6): Total occupied slots contribution = 7 (4 from G + 3 from H), exceeds Daily Limit of 6. The solver would need to find a different schedule.
+        </p>
+
+        <h2>Step 4: Objective Function</h2>
+         <p>
+            <strong>Intuition:</strong> After satisfying all constraints, the solver tries to find the *best* valid schedule by balancing two goals: maximizing total leisure time and minimizing total "stress" associated with scheduled tasks.
+        </p>
+         <p>
+            <strong>Model:</strong> Maximize <code>Z = α * Sum(L[s] for all s) - β * Sum(p_i * d_i * X[i, s] for all i in T, all s)</code>
+            where <code>α</code> and <code>β</code> are weights controlling the trade-off.
+            <ul>
+                <li><code>Sum(L[s])</code>: Total leisure minutes across all slots (maximized).</li>
+                <li><code>Sum(p_i * d_i * X[i, s])</code>: Total stress score. Since constraint (a) forces <code>Sum_s X[i,s] = 1</code> for each task <code>i</code> in T, this sum simplifies to <code>Sum(p_i * d_i for i in T)</code>. This is the total stress from all *schedulable* tasks.</li>
+            </ul>
+        </p>
+        <p>
+            <strong>Implication:</strong> Because the stress component <code>Sum(p_i * d_i for i in T)</code> is a fixed constant once the set of schedulable tasks <code>T</code> is determined by the pre-filter, minimizing this term (by subtracting <code>β * constant</code> in a maximization problem) doesn't change *which* feasible schedule is chosen if <code>α > 0</code>. The primary driver of the optimization is **maximizing total leisure time (Sum L[s])**. The stress term only acts as a constant offset to the final objective value Z. If <code>α=0</code> and <code>β>0</code>, the objective becomes minimizing a constant, which doesn't guide the solver towards any particular feasible schedule over another. Therefore, setting <code>α > 0</code> (e.g., <code>α=1</code>) is crucial for the model to actively seek schedules with more free time. The value of <code>β</code> affects the final objective value Z reported, but not the schedule itself under these conditions.
+        </p>
+
+    </body>
+</html>
