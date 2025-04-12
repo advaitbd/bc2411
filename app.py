@@ -4,7 +4,7 @@ import math
 import traceback # For detailed error logging
 
 # --- Import necessary functions ---
-from allocation_logic_no_y import (
+from allocation_logic_deadline_penalty import (
     solve_schedule_gurobi,
     datetime_to_slot,
     slot_to_datetime,
