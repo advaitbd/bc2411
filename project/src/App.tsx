@@ -73,6 +73,9 @@ function App() {
       warnings: null,
       filteredTasksInfo: null, // Initialize as null
     });
+  const [modelType, setModelType] = useState<"deadline_penalty" | "no_y">(
+    "deadline_penalty",
+  );
 
   const [selectedEvent, setSelectedEvent] = useState<
     ScheduledTaskItem | BlockedInterval | null
@@ -132,12 +135,13 @@ function App() {
 
   // --- Effects ---
   // Reset optimized state when inputs change
+  // Update the useEffect to reset optimized state when model type changes (around line 113)
   useEffect(() => {
     setIsOptimized(false);
     setOptimizedSchedule({});
     setOptimizationResult((prev) => ({ ...prev, filteredTasksInfo: null })); // Clear filtered info too
     setError(null); // Also clear general errors
-  }, [tasks, blockedIntervals, startHour, endHour]);
+  }, [tasks, blockedIntervals, startHour, endHour, modelType]); // Add modelType to deps
 
   // Helper to get task by ID
   const getTaskById = useCallback(
@@ -299,6 +303,7 @@ function App() {
     }
   };
 
+  // Update the optimize function to include modelType (around line 270)
   const handleOptimize = async () => {
     setIsLoading(true);
     setError(null); // Clear general error
@@ -327,7 +332,11 @@ function App() {
     const payload = {
       tasks: tasksToSend,
       blockedIntervals: blockedIntervals,
-      settings: { startHour: startHour, endHour: endHour },
+      settings: {
+        startHour: startHour,
+        endHour: endHour,
+        modelType: modelType, // Add model type to payload
+      },
     };
 
     console.log("Sending to /api/optimize:", JSON.stringify(payload, null, 2));
@@ -811,8 +820,11 @@ function App() {
             <TimeWindow
               startHour={startHour}
               endHour={endHour}
+              modelType={modelType}
               onStartHourChange={setStartHour}
               onEndHourChange={setEndHour}
+              onModelTypeChange={setModelType}
+              onShowExplanation={() => setShowExplanation(true)}
             />
 
             <TasksList

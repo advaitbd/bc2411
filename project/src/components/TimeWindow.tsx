@@ -1,24 +1,31 @@
 import React from "react";
-import { Settings, Info } from "lucide-react";
+import { Settings } from "lucide-react";
+import ModelToggle from "./ModelToggle";
 
 interface TimeWindowProps {
   startHour: number;
   endHour: number;
+  modelType: "deadline_penalty" | "no_y";
   onStartHourChange: (hour: number) => void;
   onEndHourChange: (hour: number) => void;
+  onModelTypeChange: (modelType: "deadline_penalty" | "no_y") => void;
+  onShowExplanation: () => void;
 }
 
 const TimeWindow: React.FC<TimeWindowProps> = ({
   startHour,
   endHour,
+  modelType,
   onStartHourChange,
   onEndHourChange,
+  onModelTypeChange,
+  onShowExplanation,
 }) => {
   return (
     <div className="bg-gray-800 p-6 rounded-xl mb-6 shadow-lg">
       <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
         <Settings className="w-5 h-5 text-purple-400" />
-        Scheduling Window Preference
+        Scheduling Preferences
       </h2>
       <div className="flex flex-col md:flex-row gap-6">
         <div className="flex-1 max-w-xs">
@@ -62,6 +69,13 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
               >{`${hour === 24 ? "24" : hour.toString().padStart(2, "0")}:00`}</option>
             ))}
           </select>
+        </div>
+        <div className="flex-1 max-w-xs">
+          <ModelToggle
+            modelType={modelType}
+            onChange={onModelTypeChange}
+            onExplanationClick={onShowExplanation}
+          />
         </div>
       </div>
     </div>

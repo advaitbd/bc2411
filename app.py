@@ -221,6 +221,10 @@ def optimize_schedule():
         blocked_input = data.get('blockedIntervals', [])
         settings_input = data.get('settings', {})
 
+        # --- Get Model Type from Settings ---
+        model_type = settings_input.get('modelType', 'deadline_penalty')  # Default to deadline penalty model
+        print(f"Using model type: {model_type}")
+
         # --- Get Start/End Hours from Settings ---
         start_hour = settings_input.get('startHour', DEFAULT_START_HOUR)
         end_hour = settings_input.get('endHour', DEFAULT_END_HOUR)
@@ -354,7 +358,7 @@ def optimize_schedule():
         # --- Parse Other Settings (e.g., Daily Limit - currently unused) ---
         settings_errors = []
         alpha = 1 # Default, could be overridden by settings
-        beta = 0.1  # Default, could be overridden by settings
+        beta = 0.1 # Default, could be overridden by settings
         daily_limit_slots = None # Default no limit
 
         # --- Combine Errors and Check ---
@@ -378,16 +382,32 @@ def optimize_schedule():
              results = {'status': 'Optimal', 'schedule': [], 'total_leisure': initial_leisure, 'total_stress': 0.0, 'message': 'No valid tasks provided to schedule.'}
              print("No valid tasks provided. Returning baseline leisure.")
         else:
-             print(f"\nCalling Gurobi solver with {len(parsed_tasks)} tasks, {len(parsed_commitments)} commitments...")
-             results = solve_schedule_gurobi(
-                 tasks=parsed_tasks,
-                 commitments=parsed_commitments,
-                 alpha=alpha,
-                 beta=beta,
-                 daily_limit_slots=daily_limit_slots,
-                 start_hour=start_hour, # Pass dynamic hours
-                 end_hour=end_hour      # Pass dynamic hours
-             )
+            print(f"\nCalling Gurobi solver with {len(parsed_tasks)} tasks, {len(parsed_commitments)} commitments...")
+
+            # Use the selected model type
+            if model_type == "no_y":
+                # Import the no_y model function only when needed
+                from allocation_logic_no_y import solve_schedule_gurobi as solve_no_y
+                results = solve_no_y(
+                    tasks=parsed_tasks,
+                    commitments=parsed_commitments,
+                    alpha=alpha,
+                    beta=beta,
+                    daily_limit_slots=daily_limit_slots,
+                    start_hour=start_hour,
+                    end_hour=end_hour
+                )
+            else:  # Default to deadline_penalty model
+                results = solve_schedule_gurobi(
+                    tasks=parsed_tasks,
+                    commitments=parsed_commitments,
+                    alpha=alpha,
+                    beta=beta,
+                    gamma=0.3,  # Default gamma for deadline penalty model
+                    daily_limit_slots=daily_limit_slots,
+                    start_hour=start_hour,
+                    end_hour=end_hour
+                )
 
         # --- Post-processing (Add warnings) ---
         warnings = commitment_errors + settings_errors
