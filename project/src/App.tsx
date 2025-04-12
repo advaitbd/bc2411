@@ -1,30 +1,15 @@
-// bc2411/project/src/App.tsx
-
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Sparkles, AlertCircle, X } from "lucide-react";
-import {
-  format,
-  addDays,
-  startOfWeek,
-  differenceInMinutes,
-  startOfDay,
-} from "date-fns";
-
-// Import components
-import ModeSelection from "./components/ModeSelection";
-import TimeWindow from "./components/TimeWindow";
-import TasksList from "./components/TasksList";
-import BlockedIntervalsList from "./components/BlockedIntervalsList";
-import CalendarComponent from "./components/Calendar";
-import TaskFormFields from "./components/TaskForm";
-import BlockFormFields, { processBlockData } from "./components/BlockForm";
-
 // Import utilities
 import { processTaskData } from "./utils/formUtils";
 import Modal from "./components/Modal";
 import EventDetailsModal from "./components/EventDetailsModal";
+import CalendarComponent from "./components/Calendar";
+import ImportScheduleModal from "./components/ImportScheduleModal";
 import ScheduledTasksList from "./ScheduledTasksList";
-
+import TimeWindow from "./components/TimeWindow";
+import TasksList from "./components/TasksList";
+import BlockedIntervalsList from "./components/BlockedIntervalsList";
+// import ModeSelection from "./components/ModeSelection"; // <-- REMOVE
+import { useState, useMemo, useEffect, useCallback } from "react";
 // Import types and utilities
 import {
   Task,
@@ -34,41 +19,63 @@ import {
   OptimizedSchedule,
   TaskFormData,
   BlockFormData,
-  OptimizationResult
+  OptimizationResult,
 } from "./types";
 import { parseLocalISO } from "./utils/dateUtils";
 import { API_BASE_URL } from "./utils/constants";
+import { parseNtuSchedule } from "./utils/scheduleParser";
+import {
+  format,
+  addDays,
+  startOfWeek,
+  differenceInMinutes,
+  startOfDay,
+} from "date-fns";
+import { processBlockData } from "./components/BlockForm";
+import BlockFormFields from "./components/BlockForm";
+import { Sparkles, AlertCircle, X } from "lucide-react";
+import TaskFormFields from "./components/TaskForm";
 
 // Import custom CSS
 import "./utils/scrollbar.css";
 
 function App() {
   // --- State Hooks ---
-  const [mode, setMode] = useState<"auto" | "manual" | null>(null);
+  // const [mode, setMode] = useState<"auto" | "manual" | null>(null); // <-- REMOVE
   const [startHour, setStartHour] = useState(8); // User preference start
   const [endHour, setEndHour] = useState(22); // User preference end
-  const [optimizedSchedule, setOptimizedSchedule] = useState<OptimizedSchedule>({});
+  const [optimizedSchedule, setOptimizedSchedule] = useState<OptimizedSchedule>(
+    {},
+  );
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [blockedIntervals, setBlockedIntervals] = useState<BlockedInterval[]>([]);
-  
+  const [blockedIntervals, setBlockedIntervals] = useState<BlockedInterval[]>(
+    [],
+  );
+
   // Calculate currentWeek based on local time start of the week
   const [currentWeekStart, setCurrentWeekStart] = useState(() =>
-    startOfWeek(new Date(), { weekStartsOn: 1 })
+    startOfWeek(new Date(), { weekStartsOn: 1 }),
   ); // Monday as start
-  
+
   const [isOptimized, setIsOptimized] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // Loading state for API calls
   const [error, setError] = useState<string | null>(null); // Error messages
-  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult>({
-    totalLeisure: null,
-    totalStress: null,
-    status: null,
-    message: null,
-    warnings: null,
-    filteredTasksInfo: null, // Initialize as null
-  });
-  
-  const [selectedEvent, setSelectedEvent] = useState<ScheduledTaskItem | BlockedInterval | null>(null);
+  // Add state for import modal
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [optimizationResult, setOptimizationResult] =
+    useState<OptimizationResult>({
+      totalLeisure: null,
+      totalStress: null,
+      status: null,
+      message: null,
+      warnings: null,
+      filteredTasksInfo: null, // Initialize as null
+    });
+
+  const [selectedEvent, setSelectedEvent] = useState<
+    ScheduledTaskItem | BlockedInterval | null
+  >(null);
   const [showEventDetailsModal, setShowEventDetailsModal] = useState(false);
 
   // --- Form States ---
@@ -77,10 +84,14 @@ function App() {
   const [showEditTaskForm, setShowEditTaskForm] = useState(false);
   const [showEditBlockForm, setShowEditBlockForm] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [editingBlock, setEditingBlock] = useState<BlockedInterval | null>(null);
-  
+  const [editingBlock, setEditingBlock] = useState<BlockedInterval | null>(
+    null,
+  );
+
   // State to store the required duration hint for the edit form
-  const [editTaskMinDurationHint, setEditTaskMinDurationHint] = useState<number | null>(null);
+  const [editTaskMinDurationHint, setEditTaskMinDurationHint] = useState<
+    number | null
+  >(null);
 
   // --- Memoized Default Form Data ---
   const defaultTaskData = useMemo<TaskFormData>(
@@ -95,7 +106,7 @@ function App() {
       // Set default date to 3 days from now
       deadlineDate: format(addDays(new Date(), 3), "yyyy-MM-dd"),
     }),
-    []
+    [],
   );
 
   const defaultBlockData = useMemo<BlockFormData>(
@@ -105,14 +116,17 @@ function App() {
       endTime: "10:00",
       date: format(new Date(), "yyyy-MM-dd"), // Default to today
     }),
-    []
+    [],
   );
 
   const [newTaskData, setNewTaskData] = useState<TaskFormData>(defaultTaskData);
-  const [newBlockData, setNewBlockData] = useState<BlockFormData>(defaultBlockData);
+  const [newBlockData, setNewBlockData] =
+    useState<BlockFormData>(defaultBlockData);
   // State to hold data for the *currently editing* forms
   const [editTaskData, setEditTaskData] = useState<TaskFormData | null>(null);
-  const [editBlockData, setEditBlockData] = useState<BlockFormData | null>(null);
+  const [editBlockData, setEditBlockData] = useState<BlockFormData | null>(
+    null,
+  );
 
   // --- Effects ---
   // Reset optimized state when inputs change
@@ -128,7 +142,7 @@ function App() {
     (taskId: string): Task | undefined => {
       return tasks.find((task) => task.id === taskId);
     },
-    [tasks]
+    [tasks],
   );
 
   // Populate edit form when editingTask changes
@@ -143,20 +157,20 @@ function App() {
         deadlineValue = editingTask.deadline;
         deadlineDateValue = format(
           addDays(new Date(), editingTask.deadline),
-          "yyyy-MM-dd"
+          "yyyy-MM-dd",
         );
       } else {
         const parsedDate = parseLocalISO(editingTask.deadline);
         if (parsedDate) {
           deadlineDateValue = format(parsedDate, "yyyy-MM-dd");
           const relativeDays = Math.ceil(
-            differenceInMinutes(parsedDate, startOfDay(new Date())) / (60 * 24)
+            differenceInMinutes(parsedDate, startOfDay(new Date())) / (60 * 24),
           );
           deadlineValue = Math.max(0, relativeDays);
         } else {
           console.warn(
             "Invalid deadline string for edit:",
-            editingTask.deadline
+            editingTask.deadline,
           );
           deadlineType = "days";
           deadlineValue = 3;
@@ -218,7 +232,9 @@ function App() {
   };
 
   // --- API Call Functions ---
-  const handleAutoGenerate = async () => {
+
+  // Generic function to fetch auto-generated data
+  const fetchAutoGeneratedData = async () => {
     setIsLoading(true);
     setError(null);
     setOptimizedSchedule({});
@@ -237,31 +253,47 @@ function App() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.error || `HTTP error! status: ${response.status}`
+          errorData.error || `HTTP error! status: ${response.status}`,
         );
       }
       const data = await response.json();
-      console.log("Auto-generated data:", data);
-      // Ensure difficulty is present (backend should provide it, but fallback just in case)
-      const tasksWithDifficulty = data.tasks.map((t: Omit<Task, 'difficulty'> & { difficulty?: number }) => ({
-        ...t,
-        difficulty: t.difficulty ?? 1,
-      }));
-      setTasks(tasksWithDifficulty);
-      setBlockedIntervals(data.blockedIntervals);
-      setMode("auto");
+      console.log("Auto-generated data fetched:", data);
+      return data; // Return the fetched data
     } catch (err) {
       console.error("Failed to auto-generate:", err);
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to fetch auto-generated data."
+          : "Failed to fetch auto-generated data.",
       );
-      setTasks([]);
-      setBlockedIntervals([]);
-      setMode(null);
+      // Don't reset tasks/blocks here, let the calling function decide
+      return null; // Indicate failure
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Specific handler for generating tasks
+  const handleGenerateTasks = async () => {
+    const data = await fetchAutoGeneratedData();
+    if (data && data.tasks) {
+      const tasksWithDifficulty = data.tasks.map(
+        (t: Omit<Task, "difficulty"> & { difficulty?: number }) => ({
+          ...t,
+          difficulty: t.difficulty ?? 1,
+        }),
+      );
+      setTasks(tasksWithDifficulty); // Replace existing tasks
+      setError(null); // Clear error on success
+    }
+  };
+
+  // Specific handler for generating blocked intervals
+  const handleGenerateBlocks = async () => {
+    const data = await fetchAutoGeneratedData();
+    if (data && data.blockedIntervals) {
+      setBlockedIntervals(data.blockedIntervals); // Replace existing blocks
+      setError(null); // Clear error on success
     }
   };
 
@@ -323,7 +355,7 @@ function App() {
         setError(
           result.error ||
             result.message ||
-            `HTTP error! status: ${response.status}`
+            `HTTP error! status: ${response.status}`,
         );
         setIsLoading(false);
         return; // Stop processing further
@@ -348,7 +380,7 @@ function App() {
           scheduleByDate[dateKey].sort(
             (a, b) =>
               (parseLocalISO(a.startTime)?.getTime() || 0) -
-              (parseLocalISO(b.startTime)?.getTime() || 0)
+              (parseLocalISO(b.startTime)?.getTime() || 0),
           );
         });
         setOptimizedSchedule(scheduleByDate);
@@ -382,7 +414,7 @@ function App() {
       ) {
         setError(
           result.message ||
-            `Optimization finished with status: ${result.status}`
+            `Optimization finished with status: ${result.status}`,
         );
       }
     } catch (err) {
@@ -403,32 +435,50 @@ function App() {
     }
   };
 
-  const handleManualMode = () => {
-    setMode("manual");
-    setTasks([]);
-    setBlockedIntervals([]);
-    setOptimizedSchedule({});
-    setIsOptimized(false);
-    setError(null);
-    setOptimizationResult({
-      totalLeisure: null,
-      totalStress: null,
-      status: null,
-      message: null,
-      warnings: null,
-      filteredTasksInfo: null,
-    });
+  // --- Schedule Import Handler ---
+  const handleImport = (scheduleText: string) => {
+    setImportErrors([]); // Clear previous errors
+    const { blocks: newBlocksData, errors: parseErrors } = parseNtuSchedule(
+      scheduleText,
+      new Date(), // Use current date as reference to start generating weeks
+      // Optional: Add numberOfWeeksToGenerate if you changed the default
+    );
+
+    if (parseErrors.length > 0) {
+      setImportErrors(parseErrors);
+      // Keep modal open if errors occurred
+    } else if (newBlocksData.length > 0) {
+      const fullNewBlocks: BlockedInterval[] = newBlocksData.map(
+        (blockData) => ({
+          ...blockData,
+          id: `imported-${Date.now()}-${Math.random().toString(16).slice(2)}-${blockData.startTime}`, // Add startTime to help uniqueness
+        }),
+      );
+      // Add new blocks to existing ones
+      // Consider replacing instead of appending if the user imports again
+      setBlockedIntervals((prevBlocks) => {
+        // Filter out previously imported blocks before adding new ones
+        const manualBlocks = prevBlocks.filter(
+          (b) => !b.id.startsWith("imported-"),
+        );
+        return [...manualBlocks, ...fullNewBlocks];
+      });
+      // setBlockedIntervals(fullNewBlocks); // Replace existing blocks
+      setShowImportModal(false); // Close modal on success
+    } else {
+      setImportErrors(["No valid class schedule details found in the text."]);
+    }
   };
 
   // --- Form Handlers ---
   const handleTaskFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-    formType: "new" | "edit"
+    formType: "new" | "edit",
   ) => {
     const { name, value, type } = e.target;
-    
+
     if (formType === "new") {
-      setNewTaskData(prev => {
+      setNewTaskData((prev) => {
         // Handle deadlineType specifically due to typing constraints
         if (name === "deadlineType") {
           if (value === "days" || value === "date") {
@@ -436,7 +486,7 @@ function App() {
           }
           return prev;
         }
-        
+
         // Special case for changing to days
         if (name === "deadlineType" && value === "days") {
           const parsedDate = parseLocalISO(`${prev.deadlineDate}T00:00:00`);
@@ -446,38 +496,41 @@ function App() {
               0,
               Math.ceil(
                 differenceInMinutes(parsedDate, startOfDay(new Date())) /
-                  (60 * 24)
-              )
+                  (60 * 24),
+              ),
             );
           }
           return { ...prev, deadlineType: "days", deadline: relativeDays };
         }
-        
+
         // Special case for changing to date
         if (name === "deadlineType" && value === "date") {
           let dateValue = prev.deadlineDate;
           if (typeof prev.deadline === "number" && prev.deadline >= 0) {
-            dateValue = format(addDays(new Date(), prev.deadline), "yyyy-MM-dd");
+            dateValue = format(
+              addDays(new Date(), prev.deadline),
+              "yyyy-MM-dd",
+            );
           }
           return { ...prev, deadlineType: "date", deadlineDate: dateValue };
         }
-        
+
         // Handle numeric fields
         const isNumeric =
           ["priority", "difficulty", "duration", "deadline"].includes(name) &&
           type !== "select" &&
           name !== "deadlineDate";
-          
+
         return {
           ...prev,
-          [name]: isNumeric ? (parseInt(value) || 0) : value,
+          [name]: isNumeric ? parseInt(value) || 0 : value,
         };
       });
     } else if (editTaskData) {
       // Only update if we have existing data
-      setEditTaskData(prev => {
+      setEditTaskData((prev) => {
         if (!prev) return null;
-        
+
         // Handle deadlineType specifically due to typing constraints
         if (name === "deadlineType") {
           if (value === "days" || value === "date") {
@@ -485,7 +538,7 @@ function App() {
           }
           return prev;
         }
-        
+
         // Special case for changing to days
         if (name === "deadlineType" && value === "days") {
           const parsedDate = parseLocalISO(`${prev.deadlineDate}T00:00:00`);
@@ -495,31 +548,34 @@ function App() {
               0,
               Math.ceil(
                 differenceInMinutes(parsedDate, startOfDay(new Date())) /
-                  (60 * 24)
-              )
+                  (60 * 24),
+              ),
             );
           }
           return { ...prev, deadlineType: "days", deadline: relativeDays };
         }
-        
+
         // Special case for changing to date
         if (name === "deadlineType" && value === "date") {
           let dateValue = prev.deadlineDate;
           if (typeof prev.deadline === "number" && prev.deadline >= 0) {
-            dateValue = format(addDays(new Date(), prev.deadline), "yyyy-MM-dd");
+            dateValue = format(
+              addDays(new Date(), prev.deadline),
+              "yyyy-MM-dd",
+            );
           }
           return { ...prev, deadlineType: "date", deadlineDate: dateValue };
         }
-        
+
         // Handle numeric fields
         const isNumeric =
           ["priority", "difficulty", "duration", "deadline"].includes(name) &&
           type !== "select" &&
           name !== "deadlineDate";
-          
+
         return {
           ...prev,
-          [name]: isNumeric ? (parseInt(value) || 0) : value,
+          [name]: isNumeric ? parseInt(value) || 0 : value,
         };
       });
     }
@@ -527,16 +583,16 @@ function App() {
 
   const handleBlockFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-    formType: "new" | "edit"
+    formType: "new" | "edit",
   ) => {
     const { name, value } = e.target;
-    
+
     if (formType === "new") {
-      setNewBlockData(prev => {
+      setNewBlockData((prev) => {
         return { ...prev, [name]: value };
       });
     } else if (editBlockData) {
-      setEditBlockData(prev => {
+      setEditBlockData((prev) => {
         if (!prev) return null;
         return { ...prev, [name]: value };
       });
@@ -577,8 +633,8 @@ function App() {
                 ...processedData,
                 difficulty: processedData.difficulty ?? task.difficulty,
               } // Ensure difficulty updates
-            : task
-        )
+            : task,
+        ),
       );
       // Clear this specific task from filtered list if it was edited successfully
       setOptimizationResult((prev) => ({
@@ -621,8 +677,8 @@ function App() {
     if (processedData) {
       setBlockedIntervals((prevBlocks) =>
         prevBlocks.map((block) =>
-          block.id === editingBlock.id ? { ...block, ...processedData } : block
-        )
+          block.id === editingBlock.id ? { ...block, ...processedData } : block,
+        ),
       );
       closeAndResetEditBlockForm();
     } else {
@@ -667,10 +723,10 @@ function App() {
     } else {
       console.error(
         "Could not find original task for filtered task:",
-        filteredTaskInfo
+        filteredTaskInfo,
       );
       setError(
-        `Could not find original task data for '${filteredTaskInfo.name}'.`
+        `Could not find original task data for '${filteredTaskInfo.name}'.`,
       );
     }
   };
@@ -683,8 +739,8 @@ function App() {
       prevTasks.map((task) =>
         task.id === filteredTaskInfo.id
           ? { ...task, duration: filteredTaskInfo.required_duration_min! } // Update duration
-          : task
-      )
+          : task,
+      ),
     );
 
     // Remove this task from the filtered list as it's now adjusted
@@ -696,7 +752,7 @@ function App() {
     }));
 
     console.log(
-      `Auto-adjusted duration for task '${filteredTaskInfo.name}' to ${filteredTaskInfo.required_duration_min} minutes.`
+      `Auto-adjusted duration for task '${filteredTaskInfo.name}' to ${filteredTaskInfo.required_duration_min} minutes.`,
     );
   };
 
@@ -736,81 +792,78 @@ function App() {
             </div>
           )}
 
-        {/* Mode Selection or Loading */}
-        {!mode && !isLoading && (
-          <ModeSelection
-            onAutoGenerate={handleAutoGenerate}
-            onManualMode={handleManualMode}
-            isLoading={isLoading}
-            mode={mode}
-          />
-        )}
-        {isLoading && !mode && (
-          <div className="flex justify-center items-center h-60 bg-gray-800 rounded-xl">
-            <Sparkles className="w-12 h-12 text-purple-400 animate-spin" />
-          </div>
-        )}
+        {/* Remove Mode Selection / Loading check - always show content */}
 
         {/* Main Content Area */}
-        {mode && (
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-            {/* Left Column (1/4) */}
-            <div className="xl:col-span-1 space-y-6">
-              <TimeWindow
-                startHour={startHour}
-                endHour={endHour}
-                onStartHourChange={setStartHour}
-                onEndHourChange={setEndHour}
-              />
-              
-              <TasksList
-                tasks={tasks}
-                filteredTasksInfo={optimizationResult.filteredTasksInfo}
-                isLoading={isLoading}
-                isManualMode={mode === "manual"}
-                onAddTask={() => setShowNewTaskForm(true)}
-                onEditTask={handleEditTaskClick}
-                onDeleteTask={handleDeleteTask}
-                onOptimize={handleOptimize}
-                onEditFilteredTask={handleEditFilteredTask}
-                onAutoAdjustDuration={handleAutoAdjustDuration}
-              />
-              
-              <BlockedIntervalsList
-                blockedIntervals={blockedIntervals}
-                isLoading={isLoading}
-                onAddBlock={() => setShowNewBlockForm(true)}
-                onEditBlock={handleEditBlockClick}
-                onDeleteBlock={handleDeleteBlock}
-              />
-            </div>
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          {/* Left Column (1/4) */}
+          <div className="xl:col-span-1 space-y-6">
+            <TimeWindow
+              startHour={startHour}
+              endHour={endHour}
+              onStartHourChange={setStartHour}
+              onEndHourChange={setEndHour}
+            />
 
-            {/* Right Column (3/4) */}
-            <div className="xl:col-span-3">
-              <CalendarComponent
-                currentWeekStart={currentWeekStart}
-                setCurrentWeekStart={setCurrentWeekStart}
-                optimizedSchedule={optimizedSchedule}
-                blockedIntervals={blockedIntervals}
-                isOptimized={isOptimized}
-                optimizationResult={{
-                  totalLeisure: optimizationResult.totalLeisure,
-                  totalStress: optimizationResult.totalStress,
-                  status: optimizationResult.status,
-                  message: optimizationResult.message,
-                  warnings: optimizationResult.warnings,
-                }}
-                error={error}
-                onEventClick={handleEventClick}
-              />
-              
-              {/* Move ScheduledTasksList inside the right column, below the calendar */}
-              {isOptimized && Object.keys(optimizedSchedule).length > 0 && (
-                <ScheduledTasksList schedule={optimizedSchedule} />
-              )}
-            </div>
+            <TasksList
+              tasks={tasks}
+              filteredTasksInfo={optimizationResult.filteredTasksInfo}
+              isLoading={isLoading}
+              onAddTask={() => setShowNewTaskForm(true)}
+              onEditTask={handleEditTaskClick}
+              onDeleteTask={handleDeleteTask}
+              onOptimize={handleOptimize}
+              onEditFilteredTask={handleEditFilteredTask}
+              onAutoAdjustDuration={handleAutoAdjustDuration}
+              onGenerateTasks={handleGenerateTasks} // <-- Pass Generate Tasks handler
+            />
+
+            <BlockedIntervalsList
+              blockedIntervals={blockedIntervals}
+              isLoading={isLoading}
+              onAddBlock={() => setShowNewBlockForm(true)}
+              onEditBlock={handleEditBlockClick}
+              onDeleteBlock={handleDeleteBlock}
+              onGenerateBlocks={handleGenerateBlocks} // <-- Pass Generate Blocks handler
+            />
+            {/* Keep Import Button */}
+            <button
+              onClick={() => {
+                setShowImportModal(true);
+                setImportErrors([]);
+              }}
+              disabled={isLoading}
+              className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-teal-800 text-sm py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              Import NTU Schedule
+            </button>
           </div>
-        )}
+
+          {/* Right Column (3/4) */}
+          <div className="xl:col-span-3">
+            <CalendarComponent
+              currentWeekStart={currentWeekStart}
+              setCurrentWeekStart={setCurrentWeekStart}
+              optimizedSchedule={optimizedSchedule}
+              blockedIntervals={blockedIntervals}
+              isOptimized={isOptimized}
+              optimizationResult={{
+                totalLeisure: optimizationResult.totalLeisure,
+                totalStress: optimizationResult.totalStress,
+                status: optimizationResult.status,
+                message: optimizationResult.message,
+                warnings: optimizationResult.warnings,
+              }}
+              error={error}
+              onEventClick={handleEventClick}
+            />
+
+            {/* Move ScheduledTasksList inside the right column, below the calendar */}
+            {isOptimized && Object.keys(optimizedSchedule).length > 0 && (
+              <ScheduledTasksList schedule={optimizedSchedule} />
+            )}
+          </div>
+        </div>
 
         {/* Modals */}
         {showNewTaskForm && (
@@ -832,7 +885,7 @@ function App() {
             />
           </Modal>
         )}
-        
+
         {showEditTaskForm && editTaskData && (
           <Modal
             title="Edit Task"
@@ -849,7 +902,7 @@ function App() {
             />
           </Modal>
         )}
-        
+
         {showNewBlockForm && (
           <Modal
             title="Add Blocked Time"
@@ -869,7 +922,7 @@ function App() {
             />
           </Modal>
         )}
-        
+
         {showEditBlockForm && editBlockData && (
           <Modal
             title="Edit Blocked Time"
@@ -885,16 +938,25 @@ function App() {
             />
           </Modal>
         )}
-        
+
         <EventDetailsModal
           showModal={showEventDetailsModal}
           selectedEvent={selectedEvent}
           onClose={() => setShowEventDetailsModal(false)}
         />
+
+        {/* Import Schedule Modal */}
+        {showImportModal && (
+          <ImportScheduleModal
+            onClose={() => setShowImportModal(false)}
+            onImport={handleImport}
+            importErrors={importErrors}
+          />
+        )}
       </div>
-      
+
       <footer className="text-center text-xs text-gray-500 mt-12 pb-4">
-        IntelliSchedule v1.4 - React + Flask + Gurobi
+        IntelliSchedule v1.5 - React + Flask + Gurobi
       </footer>
     </div>
   );

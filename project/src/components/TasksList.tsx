@@ -8,6 +8,7 @@ import {
   Trash2,
   HelpCircle,
   CheckCircle,
+  Wand2, // Icon for auto-generate
 } from "lucide-react";
 import { Task, FilteredTaskInfo } from "../types";
 import { getDeadlineDisplay } from "../utils/dateUtils";
@@ -16,26 +17,28 @@ interface TasksListProps {
   tasks: Task[];
   filteredTasksInfo: FilteredTaskInfo[] | null;
   isLoading: boolean;
-  isManualMode: boolean;
+  // isManualMode: boolean; // <-- REMOVE
   onAddTask: () => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
   onOptimize: () => void;
   onEditFilteredTask: (filteredTask: FilteredTaskInfo) => void;
   onAutoAdjustDuration: (filteredTask: FilteredTaskInfo) => void;
+  onGenerateTasks: () => void; // <-- ADD Prop
 }
 
 const TasksList: React.FC<TasksListProps> = ({
   tasks,
   filteredTasksInfo,
   isLoading,
-  isManualMode,
+  // isManualMode, // <-- REMOVE
   onAddTask,
   onEditTask,
   onDeleteTask,
   onOptimize,
   onEditFilteredTask,
   onAutoAdjustDuration,
+  onGenerateTasks, // <-- ADD Prop
 }) => {
   return (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg">
@@ -44,16 +47,25 @@ const TasksList: React.FC<TasksListProps> = ({
           <AlertCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />{" "}
           Tasks ({tasks.length})
         </h2>
-        <div className="flex gap-2">
-          {isManualMode && (
-            <button
-              onClick={onAddTask}
-              disabled={isLoading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Add
-            </button>
-          )}
+        <div className="flex gap-2 flex-wrap">
+          {" "}
+          {/* Add flex-wrap for smaller screens */}
+          <button
+            onClick={onGenerateTasks} // <-- Use the new handler
+            disabled={isLoading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
+            title="Replace current tasks with a sample set"
+          >
+            <Wand2 className="w-4 h-4" /> Generate Sample
+          </button>
+          {/* Always show Add button now */}
+          <button
+            onClick={onAddTask}
+            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-sm py-2 px-4 rounded-lg flex items-center gap-2 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Manually
+          </button>
           <button
             onClick={onOptimize}
             disabled={isLoading || tasks.length === 0}
@@ -114,7 +126,7 @@ const TasksList: React.FC<TasksListProps> = ({
 
       {tasks.length === 0 && !isLoading && (
         <p className="text-gray-400 text-center py-4 italic">
-          No tasks added yet.
+          No tasks added yet. Add manually or generate a sample.
         </p>
       )}
 
@@ -139,7 +151,9 @@ const TasksList: React.FC<TasksListProps> = ({
                 key={task.id}
                 className="bg-gray-750 hover:bg-gray-700 transition-colors rounded-lg"
               >
-                <td className="py-2.5 px-1 text-center rounded-r-lg">
+                <td className="py-2.5 px-1 text-center rounded-l-lg">
+                  {" "}
+                  {/* Adjusted padding and rounded corner */}
                   <div className="flex justify-center items-center gap-1.5">
                     <button
                       onClick={() => onEditTask(task)}
@@ -157,7 +171,8 @@ const TasksList: React.FC<TasksListProps> = ({
                     </button>
                   </div>
                 </td>
-                <td className="py-2.5 px-3 rounded-l-lg">{task.name}</td>
+                <td className="py-2.5 px-3">{task.name}</td>{" "}
+                {/* Removed rounded corner */}
                 <td className="py-2.5 px-3 text-center">{task.priority}</td>
                 <td className="py-2.5 px-3 text-center">{task.difficulty}</td>
                 <td className="py-2.5 px-3 text-center">
@@ -167,7 +182,9 @@ const TasksList: React.FC<TasksListProps> = ({
                 <td className="py-2.5 px-3 text-xs">
                   {getDeadlineDisplay(task.deadline)}
                 </td>
-                <td className="py-2.5 px-3 capitalize text-xs">
+                <td className="py-2.5 px-3 capitalize text-xs rounded-r-lg">
+                  {" "}
+                  {/* Added rounded corner */}
                   {task.preference}
                 </td>
               </tr>
