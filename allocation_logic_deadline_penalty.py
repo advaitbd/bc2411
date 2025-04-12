@@ -165,7 +165,7 @@ def calculate_deadline_penalty_factor(start_slot, task):
 # GUROBI SCHEDULER FUNCTION (MODIFIED FOR DYNAMIC HOURS & DEADLINE PENALTY)
 # ------------------------------------------------------------
 
-def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, gamma=1, # Added gamma for deadline penalty
+def solve_schedule_gurobi(tasks, commitments, alpha=1.0, beta=0.1, gamma=0.3, # Added gamma for deadline penalty
                            daily_limit_slots=None, time_limit_sec=30, hard_task_threshold=4,
                            start_hour=8, end_hour=22):
     """

@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Scheduler Logic Visualization (Deadline Penalty Model)</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                line-height: 1.6;
+                margin: 20px;
+            }
+            h1,
+            h2,
+            h3 {
+                border-bottom: 1px solid #ccc;
+                padding-bottom: 5px;
+                margin-top: 30px;
+            }
+            table {
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                width: 100%; /* Make table responsive */
+                table-layout: fixed; /* Prevent content from stretching columns */
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 4px; /* Reduced padding */
+                text-align: center;
+                font-size: 10px; /* Smaller font for slots */
+                word-wrap: break-word; /* Wrap long text */
+                vertical-align: top; /* Align text to top */
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .slot {
+                min-width: 30px; /* Ensure minimum width */
+                height: 40px; /* Slightly increased height */
+                position: relative; /* For potential overlay text */
+                background-color: #e6ffe6; /* Default: Available */
+            }
+            .slot-index {
+                font-weight: bold;
+                color: #555;
+                display: block; /* Put index on its own line */
+                margin-bottom: 2px;
+            }
+            .slot-time {
+                font-size: 9px;
+                color: #777;
+                display: block;
+            }
+            .slot-content {
+                font-size: 9px;
+                color: #333;
+                margin-top: 2px;
+            }
+            .variable-def {
+                 margin-bottom: 15px;
+            }
+            .variable-def strong {
+                 font-family: monospace;
+                 font-size: 1.1em;
+            }
+            .variable-def ul { margin-top: 5px; margin-bottom: 8px; }
+            .variable-def li { margin-bottom: 3px; }
+            .variable-def .example {
+                font-size: 0.9em;
+                margin-left: 20px;
+                padding-left: 10px;
+                border-left: 2px solid #eee;
+                font-style: italic;
+                color: #555;
+            }
+
+
+            /* --- Constraint Visualization Styles --- */
+            .committed {
+                background-color: #666; /* Dark grey */
+                color: white;
+            }
+            .task-occupied {
+                background-color: #add8e6; /* Light blue */
+            }
+            .disallowed-deadline {
+                background-color: #ffcccc; /* Light red */
+            }
+            .disallowed-preference {
+                background-color: #e0e0e0; /* Light grey */
+            }
+            .disallowed-commitment-start {
+                background-color: #ffd699; /* Light orange */
+            }
+            .disallowed-overlap-start {
+                background-color: #f0b3ff; /* Light purple */
+            }
+            .leisure-yes {
+                background-color: #aaffaa; /* Bright green */
+            }
+            .leisure-no {
+                background-color: #ffaaaa; /* Bright red */
+            }
+            .filtered-out {
+                background-color: #f5f5f5; /* Light grey background for filtered row */
+                color: #777;
+            }
+            .hard-task-day {
+                background-color: #ffe6e6; /* Light red background for hard task row */
+            }
+
+            /* --- Deadline Penalty Visualization Styles --- */
+            .deadline-penalty-low {
+                background-color: #ccffcc; /* Light green for low penalty */
+            }
+            .deadline-penalty-medium {
+                background-color: #ffffcc; /* Light yellow for medium penalty */
+            }
+            .deadline-penalty-high {
+                background-color: #ffcccc; /* Light red for high penalty */
+            }
+            .deadline-indicator {
+                position: absolute;
+                right: 0;
+                top: 0;
+                background-color: #ff6347; /* Tomato */
+                color: white;
+                font-size: 8px;
+                padding: 1px 2px;
+                border-radius: 2px;
+            }
+            .penalty-factor {
+                font-weight: bold;
+                color: #d9534f; /* Bootstrap danger color */
+            }
+
+            .legend {
+                margin-bottom: 20px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                background-color: #f9f9f9;
+            }
+            .legend span {
+                display: inline-block;
+                width: 15px;
+                height: 15px;
+                margin-right: 5px;
+                vertical-align: middle;
+                border: 1px solid #555;
+            }
+            code {
+                background-color: #eee;
+                padding: 2px 4px;
+                border-radius: 3px;
+                font-family: monospace;
+            }
+            ul { margin-top: 5px; }
+            li { margin-bottom: 5px; }
+            .stress-calculation {
+                background-color: #f8f9fa;
+                padding: 10px;
+                margin: 10px 0;
+                border-left: 3px solid #dc3545;
+                font-family: monospace;
+            }
+            .formula {
+                padding: 10px;
+                background-color: #f8f9fa;
+                border-left: 3px solid #007bff;
+                margin: 10px 0;
+                font-family: monospace;
+                font-size: 1.1em;
+            }
+            .factor-calculation {
+                font-style: italic;
+                color: #666;
+                margin: 5px 0 5px 15px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Scheduler Logic Visualization (Deadline Penalty Model)</h1>
+
+        <p>
+            This page illustrates the task scheduling process using a model that incorporates a <strong>deadline penalty</strong> to encourage scheduling tasks earlier rather than later. It builds on the base model that directly uses task start variables (<code>X</code>) and leisure variables (<code>L</code>), without the auxiliary occupation variable (<code>Y</code>). The deadline penalty model adds a stress multiplier that increases as tasks are scheduled closer to their deadlines.
+        </p>
+
+        <h2>Basic Time Slot Grid (Day 0: Slots 0-55)</h2>
+        <p>
+            Each cell represents a 15-minute slot. The top number is the global
+            slot index, the bottom is the start time. (Full horizon is 7 days,
+            slots 0-391).
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="12">Day 0 (Example: 8am - 11am)</th>
+                </tr>
+                <tr>
+                    <th>8:00</th><th>8:15</th><th>8:30</th><th>8:45</th>
+                    <th>9:00</th><th>9:15</th><th>9:30</th><th>9:45</th>
+                    <th>10:00</th><th>10:15</th><th>10:30</th><th>10:45</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <!-- 8:00 - 10:45 (Slots 0-11) -->
+                    <td class="slot" id="vis-base-0"><span class="slot-index">0</span><span class="slot-time">08:00</span></td>
+                    <td class="slot" id="vis-base-1"><span class="slot-index">1</span><span class="slot-time">08:15</span></td>
+                    <td class="slot" id="vis-base-2"><span class="slot-index">2</span><span class="slot-time">08:30</span></td>
+                    <td class="slot" id="vis-base-3"><span class="slot-index">3</span><span class="slot-time">08:45</span></td>
+                    <td class="slot" id="vis-base-4"><span class="slot-index">4</span><span class="slot-time">09:00</span></td>
+                    <td class="slot" id="vis-base-5"><span class="slot-index">5</span><span class="slot-time">09:15</span></td>
+                    <td class="slot" id="vis-base-6"><span class="slot-index">6</span><span class="slot-time">09:30</span></td>
+                    <td class="slot" id="vis-base-7"><span class="slot-index">7</span><span class="slot-time">09:45</span></td>
+                    <td class="slot" id="vis-base-8"><span class="slot-index">8</span><span class="slot-time">10:00</span></td>
+                    <td class="slot" id="vis-base-9"><span class="slot-index">9</span><span class="slot-time">10:15</span></td>
+                    <td class="slot" id="vis-base-10"><span class="slot-index">10</span><span class="slot-time">10:30</span></td>
+                    <td class="slot" id="vis-base-11"><span class="slot-index">11</span><span class="slot-time">10:45</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Step 1: Decision Variables and Model Core</h2>
+        <p>The decision variables and core constraints of the deadline penalty model remain the same as the base model:</p>
+
+        <div class="variable-def">
+            <strong>X[i, s]</strong> (Binary Variable: 0 or 1)
+            <ul>
+                <li><strong>Meaning:</strong> <code>X[i, s] = 1</code> if schedulable task <code>i</code> (from set <code>T</code>) is chosen to <strong>start</strong> at global slot <code>s</code>. Otherwise, <code>X[i, s] = 0</code>.</li>
+            </ul>
+        </div>
+
+        <div class="variable-def">
+            <strong>L[s]</strong> (Continuous Variable: 0 to 15)
+            <ul>
+                <li><strong>Meaning:</strong> <code>L[s]</code> represents the amount of <strong>leisure time</strong> (in minutes) allocated to global slot <code>s</code>.</li>
+            </ul>
+        </div>
+
+        <h2>Step 2: The Deadline Penalty Factor</h2>
+        <p>
+            <strong>Intuition:</strong> The deadline penalty model encourages scheduling tasks earlier rather than later by adding a penalty term to the objective function. This penalty increases as tasks are scheduled closer to their deadlines, creating an incentive to schedule tasks as early as possible.
+        </p>
+
+        <div class="variable-def">
+            <strong>Deadline Penalty Factor</strong> (Continuous: 0 to 1)
+            <ul>
+                <li><strong>Formula:</strong> For task <code>i</code> with deadline slot <code>dl_i</code> and duration <code>dur_i</code>, starting at slot <code>s</code>:</li>
+            </ul>
+            <div class="formula">
+                Penalty Factor = s / latest_possible_start
+            </div>
+            <p>where <code>latest_possible_start = dl_i - dur_i + 1</code></p>
+            <ul>
+                <li><strong>Meaning:</strong> The factor ranges from 0 to 1, where 0 means the task is scheduled at the earliest possible time (slot 0), and 1 means it's scheduled at the latest possible time before the deadline.</li>
+                <li><strong>Impact:</strong> This factor is then used to increase the stress score for tasks scheduled close to their deadlines.</li>
+            </ul>
+        </div>
+
+        <h3>Visualizing the Deadline Penalty Factor</h3>
+        <p>Consider Task A with duration 4 slots and deadline at slot 10 (Day 0, 10:30):</p>
+        <p><strong>Latest possible start</strong> = 10 - 4 + 1 = 7 (Day 0, 9:45)</p>
+
+        <div class="legend">
+            <span style="background-color: #ccffcc"></span> Low Penalty (0.0-0.3) &nbsp;
+            <span style="background-color: #ffffcc"></span> Medium Penalty (0.3-0.7) &nbsp;
+            <span style="background-color: #ffcccc"></span> High Penalty (0.7-1.0) &nbsp;
+            <span style="background-color: #ff6347"></span> Deadline Slot
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="11">Deadline Penalty Factor for Task A (Duration=4, Deadline=10)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="slot deadline-penalty-low">
+                        <span class="slot-index">0</span>
+                        <span class="slot-time">08:00</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.0</span></span>
+                        <div class="factor-calculation">0/7 = 0.0</div>
+                    </td>
+                    <td class="slot deadline-penalty-low">
+                        <span class="slot-index">1</span>
+                        <span class="slot-time">08:15</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.14</span></span>
+                        <div class="factor-calculation">1/7 = 0.14</div>
+                    </td>
+                    <td class="slot deadline-penalty-low">
+                        <span class="slot-index">2</span>
+                        <span class="slot-time">08:30</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.29</span></span>
+                        <div class="factor-calculation">2/7 = 0.29</div>
+                    </td>
+                    <td class="slot deadline-penalty-medium">
+                        <span class="slot-index">3</span>
+                        <span class="slot-time">08:45</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.43</span></span>
+                        <div class="factor-calculation">3/7 = 0.43</div>
+                    </td>
+                    <td class="slot deadline-penalty-medium">
+                        <span class="slot-index">4</span>
+                        <span class="slot-time">09:00</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.57</span></span>
+                        <div class="factor-calculation">4/7 = 0.57</div>
+                    </td>
+                    <td class="slot deadline-penalty-high">
+                        <span class="slot-index">5</span>
+                        <span class="slot-time">09:15</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.71</span></span>
+                        <div class="factor-calculation">5/7 = 0.71</div>
+                    </td>
+                    <td class="slot deadline-penalty-high">
+                        <span class="slot-index">6</span>
+                        <span class="slot-time">09:30</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">0.86</span></span>
+                        <div class="factor-calculation">6/7 = 0.86</div>
+                    </td>
+                    <td class="slot deadline-penalty-high">
+                        <span class="slot-index">7</span>
+                        <span class="slot-time">09:45</span>
+                        <span class="slot-content">Factor: <span class="penalty-factor">1.0</span></span>
+                        <div class="factor-calculation">7/7 = 1.0</div>
+                    </td>
+                    <td class="slot disallowed-deadline">
+                        <span class="slot-index">8</span>
+                        <span class="slot-time">10:00</span>
+                        <span class="slot-content">Invalid Start</span>
+                    </td>
+                    <td class="slot disallowed-deadline">
+                        <span class="slot-index">9</span>
+                        <span class="slot-time">10:15</span>
+                        <span class="slot-content">Invalid Start</span>
+                    </td>
+                    <td class="slot disallowed-deadline">
+                        <span class="slot-index">10</span>
+                        <span class="slot-time">10:30</span>
+                        <span class="slot-content">Deadline</span>
+                        <div class="deadline-indicator">DL</div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            <strong>Note:</strong> Starting at or after slot 8 would cause the task to finish after its deadline, so those slots are already disallowed by the deadline constraint. The penalty factor only applies to valid start slots (0-7 in this example).
+        </p>
+
+        <h3>Special Cases:</h3>
+        <ul>
+            <li>
+                <strong>Tight Deadline:</strong> If <code>latest_possible_start = 0</code> (meaning the task can only start at slot 0 to meet its deadline), the penalty factor is set to 0, as there's no "earlier" option.
+            </li>
+            <li>
+                <strong>No Deadline:</strong> If a task has no explicit deadline (or a deadline at the end of the horizon), the penalty still applies, encouraging earlier scheduling.
+            </li>
+        </ul>
+
+        <h2>Step 3: Modified Objective Function with Deadline Penalty</h2>
+        <p>
+            <strong>Intuition:</strong> The objective function is modified to include the deadline penalty factor, increasing the stress term for tasks scheduled close to their deadlines.
+        </p>
+        <div class="formula">
+            Maximize Z = α * Leisure - β * Stress<br>
+            <br>
+            where:<br>
+            Leisure = Σ L[s]  (for all slots s)<br>
+            Stress = Σ p_i * d_i * (1 + γ * deadline_penalty_factor(i,s)) * X[i,s]  (for all tasks i, slots s)
+        </div>
+
+        <ul>
+            <li><strong>α</strong> (Alpha): Weight for maximizing leisure time (typically set to 1.0)</li>
+            <li><strong>β</strong> (Beta): Weight for minimizing base stress (typically set to 0.1)</li>
+            <li><strong>γ</strong> (Gamma): Weight multiplier for the deadline penalty effect (typically set to 1.0)</li>
+            <li><strong>p_i</strong>: Priority of task i</li>
+            <li><strong>d_i</strong>: Difficulty of task i</li>
+            <li><strong>deadline_penalty_factor(i,s)</strong>: The [0,1] factor based on how late task i is scheduled relative to its deadline</li>
+        </ul>
+
+        <h3>Stress Calculation Examples:</h3>
+        <p>Let's calculate the stress for Task A (Priority=3, Difficulty=2) at different start slots:</p>
+
+        <div class="stress-calculation">
+            <strong>Base Stress</strong> = Priority * Difficulty = 3 * 2 = 6
+            <br><br>
+            <strong>Starting at slot 0 (earliest possible):</strong><br>
+            Penalty Factor = 0.0<br>
+            Total Stress = 6 * (1 + 1.0 * 0.0) = 6 * 1.0 = 6.0
+            <br><br>
+            <strong>Starting at slot 3 (middle):</strong><br>
+            Penalty Factor = 0.43<br>
+            Total Stress = 6 * (1 + 1.0 * 0.43) = 6 * 1.43 = 8.58
+            <br><br>
+            <strong>Starting at slot 7 (latest possible):</strong><br>
+            Penalty Factor = 1.0<br>
+            Total Stress = 6 * (1 + 1.0 * 1.0) = 6 * 2.0 = 12.0
+        </div>
+
+        <p>
+            The stress for starting at slot 7 (the latest possible start) is twice the stress of starting at slot 0 (the earliest possible start).
+        </p>
+
+        <h3>Impact on Scheduling Decisions:</h3>
+        <p>
+            The deadline penalty encourages the scheduler to place tasks earlier rather than later, all else being equal. When choosing between two otherwise equivalent slots for a task, the scheduler will prefer the earlier slot to minimize the stress term in the objective function.
+        </p>
+
+        <h2>Step 4: Constraints (Same as Base Model)</h2>
+        <p>
+            All constraints from the base model remain unchanged:
+        </p>
+        <ol type="a">
+            <li><strong>Mandatory Task Assignment:</strong> Every task that passed the Pi pre-filter must be scheduled exactly once.</li>
+            <li><strong>Hard Task Limitation:</strong> At most one "hard" task can start per day.</li>
+            <li><strong>Deadlines & Horizon:</strong> Tasks must finish by their deadline and fit within the 7-day window.</li>
+            <li><strong>No Overlap:</strong> Only one scheduled task can be active in any given time slot.</li>
+            <li><strong>Preferences:</strong> Tasks should start only within their preferred time windows.</li>
+            <li><strong>Commitments:</strong> Scheduled tasks cannot overlap with pre-existing fixed commitments.</li>
+            <li><strong>Leisure Calculation:</strong> Leisure time exists only in slots that are not committed and not occupied by a scheduled task.</li>
+            <li><strong>Daily Limits (Optional):</strong> Limit the total number of slots occupied by tasks per day.</li>
+        </ol>
+
+        <h2>Step 5: Tradeoffs in the Deadline Penalty Model</h2>
+        <p>
+            The deadline penalty model introduces additional considerations that affect scheduling decisions:
+        </p>
+        <ul>
+            <li>
+                <strong>Leisure vs. Early Scheduling:</strong> The model now balances three competing goals:
+                <ol>
+                    <li>Maximizing leisure time (more free slots)</li>
+                    <li>Minimizing base stress (from task difficulty/priority)</li>
+                    <li>Minimizing deadline penalties (scheduling tasks earlier)</li>
+                </ol>
+            </li>
+            <li>
+                <strong>Gamma Parameter (γ):</strong> Controls the importance of deadline penalties:
+                <ul>
+                    <li>Higher γ puts more emphasis on scheduling tasks early</li>
+                    <li>Lower γ reduces the impact of the deadline penalty, making the model behave more like the base model</li>
+                </ul>
+            </li>
+            <li>
+                <strong>Task Interplay:</strong> The model may now prioritize scheduling high-difficulty, high-priority tasks earlier, potentially displacing lower-priority tasks to later slots even if all tasks could fit.
+            </li>
+        </ul>
+
+        <h3>Example Scenario:</h3>
+        <p>Consider two tasks competing for early slots:</p>
+        <ul>
+            <li><strong>Task A:</strong> Priority=5, Difficulty=2 (Base stress = 10)</li>
+            <li><strong>Task B:</strong> Priority=2, Difficulty=1 (Base stress = 2)</li>
+        </ul>
+        <p>
+            With γ=1.0, the model would likely schedule Task A earlier than Task B (other constraints permitting) to minimize the penalty on the higher-stress task, even if both tasks have the same deadline.
+        </p>
+
+        <h2>Step 6: Benefits of the Deadline Penalty Model</h2>
+        <ul>
+            <li><strong>Proactive Scheduling:</strong> Encourages tackling tasks well before their deadlines, reducing last-minute pressure.</li>
+            <li><strong>Priority-Aware Timing:</strong> Important tasks (high priority × difficulty) are more likely to be scheduled early.</li>
+            <li><strong>Reduced Procrastination:</strong> Creates a systematic bias against pushing tasks to their deadline, mimicking good time management practices.</li>
+            <li><strong>Flexible Control:</strong> The γ parameter can be adjusted to control how strongly the model penalizes scheduling close to deadlines.</li>
+        </ul>
+
+        <p>
+            The deadline penalty model extends the base scheduler with a mechanism that encourages early task completion, leading to more balanced and forward-looking schedules.
+        </p>
+    </body>
+</html>

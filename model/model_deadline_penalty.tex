@@ -1,0 +1,273 @@
+\documentclass{article}
+\usepackage{amsmath} % For mathematical equations
+\usepackage{geometry} % For adjusting margins
+\usepackage{amssymb} % For sets (\mathbb{R}, etc. if needed, and \emptyset)
+\usepackage{amsthm} % For definition environment if needed
+\usepackage{mathtools} % For ceiling function \lceil \rceil
+
+% Adjust page margins
+\geometry{a4paper, margin=1in}
+
+% Improve paragraph spacing
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0em}
+
+\newtheorem{definition}{Definition} % Optional: For formal definitions
+
+\title{Mathematical Optimization Model for Weekly Task Scheduling with Deadline Penalties}
+\author{Formulation Documentation}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+This document presents the mathematical formulation of an optimization model designed to generate a weekly task schedule with deadline penalties. The model first applies a pre-filter based on task duration, priority, and difficulty (the "Pi condition") to determine which tasks ($T$) are eligible for scheduling. It then assigns start times to all eligible tasks within a defined time horizon, respecting various constraints, and optimizes a weighted combination of maximizing leisure time and minimizing task-related stress, with an additional penalty for scheduling tasks close to their deadlines. This model extends the base model by adding a deadline proximity factor that increases the effective stress of tasks scheduled near their deadlines.
+
+\subsection*{Time Horizon}
+The planning horizon covers $D = 7$ days. Each day consists of $S_{day}$ discrete time slots of 15 minutes each, typically representing the period from 8:00 AM to 10:00 PM (configurable). The total number of slots in the horizon is $S_{total} = D \times S_{day}$. Slots are indexed globally from $s = 0$ to $S_{total}-1$.
+
+\section{Parameters and Inputs}
+
+The model utilizes the following input parameters:
+
+\begin{itemize}
+    \item \textbf{Set of All Tasks ($T_{all}$):} The initial collection of tasks provided by the user, indexed by $i$.
+    \item \textbf{Task Attributes ($\forall i \in T_{all}$):}
+    \begin{itemize}
+        \item $p_i$: Numerical priority of task $i$.
+        \item $d_i$: Numerical difficulty of task $i$. Assumed $d_i > 0, p_i > 0$.
+        \item $dur\_slots_i$: Duration of task $i$, measured in the number of time slots (1 slot = 15 minutes).
+        \item $dur\_min_i$: Duration of task $i$, measured in minutes ($dur\_min_i = dur\_slots_i \times 15$).
+        \item $dl_i$: Deadline for task $i$, represented as the global slot index by which the task must be fully completed.
+        \item $AllowedSlots_i$: A subset of $\{0, ..., S_{total}-1\}$ indicating the permissible start slots for task $i$ based on its time preference (e.g., "morning", "afternoon").
+        \item $hard\_threshold$: Integer difficulty rating at or above which a task is considered "hard" (default: 4).
+    \end{itemize}
+    \item \textbf{Set of Committed Slots ($C$):} A subset of $\{0, ..., S_{total}-1\}$ representing time slots that are pre-allocated and unavailable for scheduling tasks (e.g., meetings, appointments).
+    \item \textbf{Objective Weights:}
+    \begin{itemize}
+        \item $\alpha \ge 0$: Weight coefficient emphasizing the maximization of leisure time.
+        \item $\beta \ge 0$: Weight coefficient emphasizing the minimization of the total stress score.
+        \item $\gamma \ge 0$: Weight coefficient controlling the impact of deadline proximity on stress (new in this model).
+    \end{itemize}
+    \item \textbf{Daily Limit ($Limit_{daily}$, Optional):} An integer representing the maximum number of slots that can be occupied by tasks on any single day $d \in \{0, ..., D-1\}$.
+\end{itemize}
+
+\section{Task Pre-filtering (Pi Condition)}
+
+Before optimization, tasks are filtered based on a derived "Probability of Importance" (Pi) condition. Only tasks meeting this condition are considered schedulable.
+
+\begin{definition}[Schedulable Tasks (T)]
+A task $i \in T_{all}$ is considered schedulable and included in the set $T$ (where $T \subseteq T_{all}$) if it satisfies the following condition, which is derived from the original requirement that the probability of completion ($P_i$) must be at least 0.7:
+\begin{equation}
+dur\_min_i \ge (d_i \times p_i) \times \ln\left(\frac{10}{3}\right)
+\label{eq:pi_condition}\end{equation}
+Tasks in $T_{all}$ that do not meet this condition are excluded from the optimization process. Let $T = \{ i \in T_{all} \mid \text{Eq. (\ref{eq:pi_condition}) holds} \}$.
+\end{definition}
+
+\textbf{Derivation of the Pi Condition:}
+The condition stems from an underlying model assumption (not explicitly part of the MILP formulation, but used as a pre-filter) that a task $i$ is only viable if its estimated probability of completion ($P_i$) within the allocated time ($dur\_min_i$) is sufficient. This probability was defined in earlier documentation as:
+\[ P_i = 1 - \exp\left(-\lambda_i \times \frac{dur\_min_i}{d_i \times p_i}\right) \]
+where $\lambda_i$ is a rate parameter (assumed to be $\lambda_i = 1$), $d_i$ is difficulty, and $p_i$ is priority (urgency). The required threshold is $P_i \ge 0.7$.
+
+Setting $\lambda_i = 1$ and applying the threshold:
+\[ 1 - \exp\left(-\frac{dur\_min_i}{d_i \times p_i}\right) \ge 0.7 \]
+\[ 0.3 \ge \exp\left(-\frac{dur\_min_i}{d_i \times p_i}\right) \]
+Taking the natural logarithm of both sides (which preserves the inequality direction):
+\[ \ln(0.3) \ge -\frac{dur\_min_i}{d_i \times p_i} \]
+Multiply by -1 and reverse the inequality sign:
+\[ -\ln(0.3) \le \frac{dur\_min_i}{d_i \times p_i} \]
+Using the property $-\ln(x) = \ln(1/x)$:
+\[ \ln\left(\frac{1}{0.3}\right) \le \frac{dur\_min_i}{d_i \times p_i} \]
+\[ \ln\left(\frac{10}{3}\right) \le \frac{dur\_min_i}{d_i \times p_i} \]
+Rearranging for $dur\_min_i$ (assuming $d_i > 0, p_i > 0$):
+\[ dur\_min_i \ge (d_i \times p_i) \times \ln\left(\frac{10}{3}\right) \]
+This yields the inequality used in Definition 1.
+
+\section{Decision Variables}
+
+The model determines the values of the following variables for the set of \textbf{schedulable tasks $T$}:
+
+\begin{enumerate}
+    \item \textbf{$X_{i,s}$ (Binary):} Indicates if schedulable task $i \in T$ starts at slot $s$.
+    \[ X_{i,s} = \begin{cases} 1 & \text{if task } i \in T \text{ starts at slot } s \in \{0, ..., S_{total}-1\} \\ 0 & \text{otherwise} \end{cases} \]
+
+    \item \textbf{$L_{s}$ (Continuous):} Represents the leisure time (in minutes) available in slot $s$.
+    \[ L_{s} \in [0, 15] \quad \forall s \in \{0, ..., S_{total}-1\} \]
+\end{enumerate}
+
+\section{Deadline Penalty Factor}
+
+This model introduces a deadline penalty factor that increases the stress associated with scheduling tasks closer to their deadlines. This factor is calculated for each task $i \in T$ and potential start slot $s$.
+
+\begin{definition}[Deadline Penalty Factor]
+For a task $i \in T$ with deadline slot $dl_i$ and duration $dur\_slots_i$, the deadline penalty factor $\phi_{i,s}$ for starting at slot $s$ is defined as:
+
+\begin{equation}
+\phi_{i,s} = 
+\begin{cases}
+\frac{s}{LPS_i} & \text{if } LPS_i > 0 \\
+0 & \text{if } LPS_i = 0
+\end{cases}
+\label{eq:deadline_penalty_factor}
+\end{equation}
+
+where $LPS_i = \max(0, dl_i - dur\_slots_i + 1)$ is the latest possible start slot that allows task $i$ to complete by its deadline.
+\end{definition}
+
+\textbf{Properties of the Deadline Penalty Factor:}
+\begin{itemize}
+    \item $\phi_{i,s} \in [0, 1]$ for all valid start slots $s$ (ensured by the deadline constraint).
+    \item $\phi_{i,s} = 0$ when $s = 0$ (starting at the earliest possible slot).
+    \item $\phi_{i,s} = 1$ when $s = LPS_i$ (starting at the latest possible slot before the deadline).
+    \item If $LPS_i = 0$ (i.e., the task can only start at slot 0 to meet its deadline), then $\phi_{i,s} = 0$.
+\end{itemize}
+
+\section{Objective Function with Deadline Penalty}
+
+The objective is to maximize a weighted sum reflecting the trade-off between leisure, base stress, and deadline penalties:
+
+\[
+\text{Maximize} \quad Z = \alpha \sum_{s=0}^{S_{total}-1} L_s - \beta \sum_{i \in T} \sum_{s=0}^{S_{total}-1} (p_i \times d_i) \times (1 + \gamma \times \phi_{i,s}) \times X_{i,s}
+\]
+
+\textbf{Explanation:}
+\begin{itemize}
+    \item The first term, $\alpha \sum L_s$, promotes maximizing the total leisure time across all slots.
+    
+    \item The second term (the stress term) now includes the deadline penalty factor:
+    \[ \beta \sum_{i \in T} \sum_{s=0}^{S_{total}-1} (p_i \times d_i) \times (1 + \gamma \times \phi_{i,s}) \times X_{i,s} \]
+    
+    \item The base stress for task $i$ is still $p_i \times d_i$, but now multiplied by a factor $(1 + \gamma \times \phi_{i,s})$ which increases as the task is scheduled closer to its deadline.
+    
+    \item $\gamma \geq 0$ is a parameter that controls the strength of the deadline penalty. Larger values of $\gamma$ place more emphasis on scheduling tasks earlier rather than later.
+    
+    \item When $\gamma = 0$, this model reduces to the base model without deadline penalties.
+    
+    \item When $\gamma > 0$, the effective stress of scheduling task $i$ at slot $s$ can increase by up to a factor of $(1 + \gamma)$ when the task is scheduled at its latest possible start time.
+\end{itemize}
+
+\textbf{Example:} For a task with priority 3 and difficulty 2 (base stress = 6), with $\gamma = 1$:
+\begin{itemize}
+    \item If scheduled at slot 0 (earliest): $(1 + 1 \times 0) \times 6 = 6$ (no penalty)
+    \item If scheduled halfway to deadline ($\phi_{i,s} = 0.5$): $(1 + 1 \times 0.5) \times 6 = 9$ (50\% increase)
+    \item If scheduled at latest possible slot ($\phi_{i,s} = 1.0$): $(1 + 1 \times 1.0) \times 6 = 12$ (100\% increase)
+\end{itemize}
+
+\section{Constraints}
+
+The constraints in the deadline penalty model remain the same as in the base model. They define the feasible schedules for the set of \textbf{schedulable tasks $T$}:
+
+\subsection{Mandatory Task Assignment}
+Ensures every task that passed the pre-filter (i.e., is in set $T$) is scheduled exactly once.
+
+\begin{equation}
+\sum_{s=0}^{S_{total}-1} X_{i,s} = 1 \quad \forall i \in T \label{eq:task_must_start}
+\end{equation}
+
+\subsection{Hard Task Limitation}
+Restricts the number of difficult tasks (from set $T$) starting on any single day.
+
+\[
+\sum_{i \in T_{\text{hard}}} \sum_{s \in \text{Slots}_{day,d}} X_{i,s} \leq 1 \quad \forall d \in \{0, ..., D-1\}
+\]
+where $T_{\text{hard}} = \{i \in T : d_i \geq \text{hard\_threshold}\}$ is the subset of \textit{schedulable} tasks with difficulty ratings at or above the threshold. $Slots_{day,d}$ is the set of global slot indices belonging to day $d$.
+
+\subsection{Deadlines and Horizon}
+Ensures that scheduled tasks (from set $T$) are completed by their deadline and fit entirely within the scheduling horizon.
+
+\[
+X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } (s + dur\_slots_i - 1 > dl_i) \lor (s + dur\_slots_i > S_{total})
+\]
+
+\textbf{Note:} This constraint is particularly important for the deadline penalty model, as it defines the feasible range of start slots for which the deadline penalty factor $\phi_{i,s}$ is calculated.
+
+\subsection{No Overlap}
+Prevents two or more scheduled tasks (from set $T$) from being active in the same time slot.
+
+\begin{equation}
+\sum_{i \in T} \sum_{start = \max(0, t - dur\_slots_i + 1)}^{t} X_{i,start} \le 1 \quad \forall t \in \{0, ..., S_{total}-1\} \label{eq:no_overlap}
+\end{equation}
+
+\subsection{Preferences}
+Restricts the starting time of scheduled tasks (from set $T$) to their allowed time windows.
+
+\[
+X_{i,s} = 0 \quad \forall i \in T, \forall s \notin AllowedSlots_i
+\]
+
+\subsection{Commitments}
+Prevents any part of a scheduled task (from set $T$) from coinciding with predefined fixed commitments (set $C$).
+
+\[
+X_{i,s} = 0 \quad \forall i \in T, \forall s \text{ such that } \{s, s+1, ..., s + dur\_slots_i - 1\} \cap C \neq \emptyset
+\]
+
+\subsection{Leisure Calculation}
+Defines leisure $L_s$ based on commitments and task occupation.
+
+\begin{align}
+L_s &= 0 \quad &&\forall s \in C \label{eq:leisure_commit_noY} \\
+L_s &\le 15 \times \left(1 - \sum_{i \in T} \sum_{start = \max(0, s - dur\_slots_i + 1)}^{s} X_{i,start}\right) \quad &&\forall s \notin C \label{eq:leisure_task_noY} \\
+L_s &\ge 0 \quad &&\forall s \label{eq:leisure_nonneg_noY}
+\end{align}
+
+\subsection{Daily Limits (Optional)}
+Enforces a maximum total number of task-occupied slots (by tasks from $T$) within any single day.
+
+\[
+\sum_{i \in T} \sum_{start=0}^{S_{total}-1} \left( X_{i,start} \times \text{SlotsInDay}(start, dur\_slots_i, d) \right) \le Limit_{daily} \quad \forall d \in \{0, ..., D-1\}
+\]
+where $Slots_{day, d}$ is the set of global slot indices belonging to day $d$ (from $d \times S_{day}$ to $(d+1) \times S_{day} - 1$), and $\text{SlotsInDay}(start, duration, day)$ calculates the number of slots occupied by a task starting at $start$ with $duration$ that fall within day $d$.
+
+\section{Implementation Considerations}
+
+\subsection{Dynamic Scheduling Window}
+The model supports a configurable daily scheduling window by adjusting $S_{day}$ based on the desired start and end hours. This flexibility allows users to define different active periods (e.g., 8am-10pm, 9am-5pm) while maintaining the same mathematical formulation.
+
+\subsection{Gamma Parameter Selection}
+The $\gamma$ parameter controls the trade-off between scheduling tasks early versus maximizing leisure or minimizing base stress:
+\begin{itemize}
+    \item $\gamma = 0$: No penalty for late scheduling; equivalent to the base model
+    \item $\gamma \approx 1$: Balanced approach; tasks scheduled at their latest possible time have their stress doubled
+    \item $\gamma > 1$: Strong preference for early scheduling; dramatically increases stress for tasks scheduled close to deadlines
+\end{itemize}
+
+\subsection{Computational Impact}
+The deadline penalty factor doesn't introduce additional constraints or variables compared to the base model, but it does make the objective function more complex. This generally has minimal impact on solving times, as it only affects the coefficients in the existing stress term.
+
+\section{Output}
+
+If the optimization problem is feasible and a solution is found, the model output provides:
+\begin{itemize}
+    \item The optimal objective function value $Z$.
+    \item A schedule detailing the assigned start slot $s$ (where $X_{i,s}=1$) for each schedulable task $i \in T$.
+    \item The calculated total leisure time $\sum L_s$.
+    \item The calculated total stress score based on scheduled tasks, including the deadline penalty: 
+    \[ \sum_{i \in T} (p_i \times d_i \times (1 + \gamma \times \phi_{i,s_i})) \]
+    where $s_i$ is the assigned start slot for task $i$.
+    \item A list of tasks from the original set $T_{all}$ that were filtered out by the Pi condition and thus not considered for scheduling (set $T_{all} \setminus T$). Includes the reason for filtering.
+    \item The effective completion rate, calculated as $|T| / |T_{all}|$, representing the fraction of initially provided tasks that were deemed schedulable by the filter.
+\end{itemize}
+
+\section{Benefit Analysis}
+
+The deadline penalty model offers several advantages over the base model:
+
+\begin{itemize}
+    \item \textbf{Proactive Time Management:} By penalizing scheduling close to deadlines, the model encourages completing tasks well before they're due, reducing last-minute pressure.
+    
+    \item \textbf{Priority-Weighted Urgency:} Higher priority/difficulty tasks face stronger deadline penalties, causing the model to schedule these important tasks earlier than less important ones, even with similar deadlines.
+    
+    \item \textbf{Procrastination Mitigation:} The model systematically discourages pushing tasks to their deadlines, mimicking good time management practices.
+    
+    \item \textbf{Customizable Urgency:} The $\gamma$ parameter provides a tunable control over how strongly the model avoids scheduling tasks close to their deadlines.
+    
+    \item \textbf{Forward-Looking Schedules:} The model produces more balanced schedules that distribute workload more evenly across the time horizon, reducing stress peaks.
+\end{itemize}
+
+The deadline penalty model maintains all the functionality of the base model while adding a natural bias toward earlier task completion. This matches the intuition that even when a task technically "can wait," it's often better to handle it sooner rather than later.
+
+\end{document}
