@@ -21,9 +21,20 @@ sns.set_style("whitegrid")
 # Create output directory for charts
 os.makedirs('sensitivity_results', exist_ok=True)
 
-def run_sensitivity_analysis():
-    """Run comprehensive sensitivity analysis on scheduler models."""
-    print("Starting sensitivity analysis...")
+def run_sensitivity_analysis(models="both"):
+    """Run comprehensive sensitivity analysis on scheduler models.
+    
+    Args:
+        models (str): Which models to run sensitivity analysis for:
+            - "standard": Only run the standard model (without deadline penalty)
+            - "deadline": Only run the deadline penalty model
+            - "both": Run both models (default)
+    """
+    print(f"Starting sensitivity analysis for {models} model(s)...")
+    
+    # Validate models parameter
+    if models not in ["standard", "deadline", "both"]:
+        raise ValueError("'models' must be one of: 'standard', 'deadline', 'both'")
 
     # Generate consistent test data (use seed for reproducibility)
     np.random.seed(42)
@@ -42,16 +53,21 @@ def run_sensitivity_analysis():
     daily_limit_slots = [None, 12, 16, 20]
 
     # Run sensitivity analyses
-    alpha_sensitivity(solver_tasks, solver_commitments, alpha_values)
-    beta_sensitivity(solver_tasks, solver_commitments, beta_values)
-    gamma_sensitivity(solver_tasks, solver_commitments, gamma_values)
-    hard_task_sensitivity(solver_tasks, solver_commitments, hard_task_thresholds)
-    daily_limit_sensitivity(solver_tasks, solver_commitments, daily_limit_slots)
+    alpha_sensitivity(solver_tasks, solver_commitments, alpha_values, models)
+    beta_sensitivity(solver_tasks, solver_commitments, beta_values, models)
+    
+    # Only run gamma sensitivity for deadline model
+    if models in ["deadline", "both"]:
+        gamma_sensitivity(solver_tasks, solver_commitments, gamma_values)
+    
+    hard_task_sensitivity(solver_tasks, solver_commitments, hard_task_thresholds, models)
+    daily_limit_sensitivity(solver_tasks, solver_commitments, daily_limit_slots, models)
 
-    # Run model comparison
-    compare_models(solver_tasks, solver_commitments)
+    # Run model comparison only if both models are selected
+    if models == "both":
+        compare_models(solver_tasks, solver_commitments)
 
-    print("Sensitivity analysis complete. Results saved to 'sensitivity_results' directory.")
+    print(f"Sensitivity analysis for {models} model(s) complete. Results saved to 'sensitivity_results' directory.")
 
 def prepare_data_for_solver(tasks, blocked_intervals):
     """Convert task and blocked interval data to solver format."""
@@ -106,53 +122,62 @@ def prepare_data_for_solver(tasks, blocked_intervals):
 
     return solver_tasks, solver_commitments
 
-def alpha_sensitivity(tasks, commitments, alpha_values):
-    """Analyze sensitivity to alpha parameter (leisure weight)."""
+def alpha_sensitivity(tasks, commitments, alpha_values, models="both"):
+    """Analyze sensitivity to alpha parameter (leisure weight).
+    
+    Args:
+        tasks: List of tasks
+        commitments: Dictionary of commitments
+        alpha_values: List of alpha values to test
+        models: Which models to run ("standard", "deadline", or "both")
+    """
     results_no_y = []
     results_deadline = []
 
-    # Run both models with different alpha values
+    # Run selected models with different alpha values
     for alpha in alpha_values:
-        # Run no_y model
-        result_no_y = solve_no_y(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=alpha,
-            beta=0.1,  # Fixed
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_no_y.append({
-            'alpha': alpha,
-            'objective': result_no_y.get('objective_value', 0),
-            'leisure': result_no_y.get('total_leisure', 0),
-            'stress': result_no_y.get('total_stress', 0),
-            'completion_rate': result_no_y.get('completion_rate', 0)
-        })
+        # Run standard model if selected
+        if models in ["standard", "both"]:
+            result_no_y = solve_no_y(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=alpha,
+                beta=0.1,  # Fixed
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_no_y.append({
+                'alpha': alpha,
+                'objective': result_no_y.get('objective_value', 0),
+                'leisure': result_no_y.get('total_leisure', 0),
+                'stress': result_no_y.get('total_stress', 0),
+                'completion_rate': result_no_y.get('completion_rate', 0)
+            })
 
-        # Run deadline penalty model
-        result_deadline = solve_with_deadline_penalty(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=alpha,
-            beta=0.1,  # Fixed
-            gamma=1.0,  # Fixed
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_deadline.append({
-            'alpha': alpha,
-            'objective': result_deadline.get('objective_value', 0),
-            'leisure': result_deadline.get('total_leisure', 0),
-            'stress': result_deadline.get('total_stress', 0),
-            'completion_rate': result_deadline.get('completion_rate', 0)
-        })
+        # Run deadline penalty model if selected
+        if models in ["deadline", "both"]:
+            result_deadline = solve_with_deadline_penalty(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=alpha,
+                beta=0.1,  # Fixed
+                gamma=1.0,  # Fixed
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_deadline.append({
+                'alpha': alpha,
+                'objective': result_deadline.get('objective_value', 0),
+                'leisure': result_deadline.get('total_leisure', 0),
+                'stress': result_deadline.get('total_stress', 0),
+                'completion_rate': result_deadline.get('completion_rate', 0)
+            })
 
     # Create dataframes
-    df_no_y = pd.DataFrame(results_no_y)
-    df_deadline = pd.DataFrame(results_deadline)
+    df_no_y = pd.DataFrame(results_no_y) if results_no_y else None
+    df_deadline = pd.DataFrame(results_deadline) if results_deadline else None
 
     # Plot results
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
@@ -165,8 +190,13 @@ def alpha_sensitivity(tasks, commitments, alpha_values):
         row, col = i // 2, i % 2
         ax = axs[row, col]
 
-        ax.plot(df_no_y['alpha'], df_no_y[metric], 'o-', label='Standard Model')
-        ax.plot(df_deadline['alpha'], df_deadline[metric], 's-', label='Deadline Penalty Model')
+        # Plot standard model if selected
+        if models in ["standard", "both"] and df_no_y is not None:
+            ax.plot(df_no_y['alpha'], df_no_y[metric], 'o-', label='Standard Model')
+        
+        # Plot deadline model if selected
+        if models in ["deadline", "both"] and df_deadline is not None:
+            ax.plot(df_deadline['alpha'], df_deadline[metric], 's-', label='Deadline Penalty Model')
 
         ax.set_xlabel('Alpha (α)')
         ax.set_ylabel(title)
@@ -174,62 +204,85 @@ def alpha_sensitivity(tasks, commitments, alpha_values):
         ax.legend()
 
         # Add data labels
-        for df, marker in [(df_no_y, 'o'), (df_deadline, 's')]:
-            for x, y in zip(df['alpha'], df[metric]):
+        if models in ["standard", "both"] and df_no_y is not None:
+            for x, y in zip(df_no_y['alpha'], df_no_y[metric]):
+                ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
+                            xytext=(0, 10), ha='center')
+        
+        if models in ["deadline", "both"] and df_deadline is not None:
+            for x, y in zip(df_deadline['alpha'], df_deadline[metric]):
                 ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
                             xytext=(0, 10), ha='center')
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('sensitivity_results/alpha_sensitivity.png', dpi=300, bbox_inches='tight')
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    
+    # Save with model-specific filename
+    if models == "both":
+        filename = 'alpha_sensitivity.png'
+    elif models == "standard":
+        filename = 'alpha_sensitivity_standard.png'
+    else:
+        filename = 'alpha_sensitivity_deadline.png'
+        
+    plt.savefig(f'sensitivity_results/{filename}', dpi=300, bbox_inches='tight')
     plt.close()
 
-def beta_sensitivity(tasks, commitments, beta_values):
-    """Analyze sensitivity to beta parameter (stress weight)."""
+def beta_sensitivity(tasks, commitments, beta_values, models="both"):
+    """Analyze sensitivity to beta parameter (stress weight).
+    
+    Args:
+        tasks: List of tasks
+        commitments: Dictionary of commitments
+        beta_values: List of beta values to test
+        models: Which models to run ("standard", "deadline", or "both")
+    """
     results_no_y = []
     results_deadline = []
 
-    # Run both models with different beta values
+    # Run selected models with different beta values
     for beta in beta_values:
-        # Run no_y model
-        result_no_y = solve_no_y(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=beta,
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_no_y.append({
-            'beta': beta,
-            'objective': result_no_y.get('objective_value', 0),
-            'leisure': result_no_y.get('total_leisure', 0),
-            'stress': result_no_y.get('total_stress', 0),
-            'completion_rate': result_no_y.get('completion_rate', 0)
-        })
+        # Run standard model if selected
+        if models in ["standard", "both"]:
+            result_no_y = solve_no_y(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=beta,
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_no_y.append({
+                'beta': beta,
+                'objective': result_no_y.get('objective_value', 0),
+                'leisure': result_no_y.get('total_leisure', 0),
+                'stress': result_no_y.get('total_stress', 0),
+                'completion_rate': result_no_y.get('completion_rate', 0)
+            })
 
-        # Run deadline penalty model
-        result_deadline = solve_with_deadline_penalty(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=beta,
-            gamma=1.0,  # Fixed
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_deadline.append({
-            'beta': beta,
-            'objective': result_deadline.get('objective_value', 0),
-            'leisure': result_deadline.get('total_leisure', 0),
-            'stress': result_deadline.get('total_stress', 0),
-            'completion_rate': result_deadline.get('completion_rate', 0)
-        })
+        # Run deadline penalty model if selected
+        if models in ["deadline", "both"]:
+            result_deadline = solve_with_deadline_penalty(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=beta,
+                gamma=1.0,  # Fixed
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_deadline.append({
+                'beta': beta,
+                'objective': result_deadline.get('objective_value', 0),
+                'leisure': result_deadline.get('total_leisure', 0),
+                'stress': result_deadline.get('total_stress', 0),
+                'completion_rate': result_deadline.get('completion_rate', 0)
+            })
 
     # Create dataframes
-    df_no_y = pd.DataFrame(results_no_y)
-    df_deadline = pd.DataFrame(results_deadline)
+    df_no_y = pd.DataFrame(results_no_y) if results_no_y else None
+    df_deadline = pd.DataFrame(results_deadline) if results_deadline else None
 
     # Plot results
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
@@ -242,8 +295,13 @@ def beta_sensitivity(tasks, commitments, beta_values):
         row, col = i // 2, i % 2
         ax = axs[row, col]
 
-        ax.plot(df_no_y['beta'], df_no_y[metric], 'o-', label='Standard Model')
-        ax.plot(df_deadline['beta'], df_deadline[metric], 's-', label='Deadline Penalty Model')
+        # Plot standard model if selected
+        if models in ["standard", "both"]:
+            ax.plot(df_no_y['beta'], df_no_y[metric], 'o-', label='Standard Model')
+        
+        # Plot deadline model if selected
+        if models in ["deadline", "both"]:
+            ax.plot(df_deadline['beta'], df_deadline[metric], 's-', label='Deadline Penalty Model')
 
         ax.set_xlabel('Beta (β)')
         ax.set_ylabel(title)
@@ -251,13 +309,27 @@ def beta_sensitivity(tasks, commitments, beta_values):
         ax.legend()
 
         # Add data labels
-        for df, marker in [(df_no_y, 'o'), (df_deadline, 's')]:
-            for x, y in zip(df['beta'], df[metric]):
+        if models in ["standard", "both"]:
+            for x, y in zip(df_no_y['beta'], df_no_y[metric]):
+                ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
+                            xytext=(0, 10), ha='center')
+        
+        if models in ["deadline", "both"]:
+            for x, y in zip(df_deadline['beta'], df_deadline[metric]):
                 ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
                             xytext=(0, 10), ha='center')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('sensitivity_results/beta_sensitivity.png', dpi=300, bbox_inches='tight')
+    
+    # Save with model-specific filename
+    if models == "both":
+        filename = 'beta_sensitivity.png'
+    elif models == "standard":
+        filename = 'beta_sensitivity_standard.png'
+    else:
+        filename = 'beta_sensitivity_deadline.png'
+        
+    plt.savefig(f'sensitivity_results/{filename}', dpi=300, bbox_inches='tight')
     plt.close()
 
 def gamma_sensitivity(tasks, commitments, gamma_values):
@@ -404,53 +476,62 @@ def analyze_deadline_proximity(tasks, commitments, gamma_values):
             plt.savefig('sensitivity_results/proximity_by_task_attributes.png', dpi=300, bbox_inches='tight')
             plt.close()
 
-def hard_task_sensitivity(tasks, commitments, threshold_values):
-    """Analyze sensitivity to hard task threshold."""
+def hard_task_sensitivity(tasks, commitments, threshold_values, models="both"):
+    """Analyze sensitivity to hard task threshold.
+    
+    Args:
+        tasks: List of tasks
+        commitments: Dictionary of commitments
+        threshold_values: List of hard task threshold values to test
+        models: Which models to run ("standard", "deadline", or "both")
+    """
     results_no_y = []
     results_deadline = []
 
-    # Run both models with different threshold values
+    # Run selected models with different threshold values
     for threshold in threshold_values:
-        # Run no_y model
-        result_no_y = solve_no_y(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=0.1,   # Fixed
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=threshold
-        )
-        results_no_y.append({
-            'threshold': threshold,
-            'objective': result_no_y.get('objective_value', 0),
-            'leisure': result_no_y.get('total_leisure', 0),
-            'stress': result_no_y.get('total_stress', 0),
-            'completion_rate': result_no_y.get('completion_rate', 0)
-        })
+        # Run standard model if selected
+        if models in ["standard", "both"]:
+            result_no_y = solve_no_y(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=0.1,   # Fixed
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=threshold
+            )
+            results_no_y.append({
+                'threshold': threshold,
+                'objective': result_no_y.get('objective_value', 0),
+                'leisure': result_no_y.get('total_leisure', 0),
+                'stress': result_no_y.get('total_stress', 0),
+                'completion_rate': result_no_y.get('completion_rate', 0)
+            })
 
-        # Run deadline penalty model
-        result_deadline = solve_with_deadline_penalty(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=0.1,   # Fixed
-            gamma=1.0,  # Fixed
-            daily_limit_slots=None,
-            time_limit_sec=30,
-            hard_task_threshold=threshold
-        )
-        results_deadline.append({
-            'threshold': threshold,
-            'objective': result_deadline.get('objective_value', 0),
-            'leisure': result_deadline.get('total_leisure', 0),
-            'stress': result_deadline.get('total_stress', 0),
-            'completion_rate': result_deadline.get('completion_rate', 0)
-        })
+        # Run deadline penalty model if selected
+        if models in ["deadline", "both"]:
+            result_deadline = solve_with_deadline_penalty(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=0.1,   # Fixed
+                gamma=1.0,  # Fixed
+                daily_limit_slots=None,
+                time_limit_sec=30,
+                hard_task_threshold=threshold
+            )
+            results_deadline.append({
+                'threshold': threshold,
+                'objective': result_deadline.get('objective_value', 0),
+                'leisure': result_deadline.get('total_leisure', 0),
+                'stress': result_deadline.get('total_stress', 0),
+                'completion_rate': result_deadline.get('completion_rate', 0)
+            })
 
     # Create dataframes
-    df_no_y = pd.DataFrame(results_no_y)
-    df_deadline = pd.DataFrame(results_deadline)
+    df_no_y = pd.DataFrame(results_no_y) if results_no_y else None
+    df_deadline = pd.DataFrame(results_deadline) if results_deadline else None
 
     # Plot results
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
@@ -463,8 +544,13 @@ def hard_task_sensitivity(tasks, commitments, threshold_values):
         row, col = i // 2, i % 2
         ax = axs[row, col]
 
-        ax.plot(df_no_y['threshold'], df_no_y[metric], 'o-', label='Standard Model')
-        ax.plot(df_deadline['threshold'], df_deadline[metric], 's-', label='Deadline Penalty Model')
+        # Plot standard model if selected
+        if models in ["standard", "both"]:
+            ax.plot(df_no_y['threshold'], df_no_y[metric], 'o-', label='Standard Model')
+        
+        # Plot deadline model if selected
+        if models in ["deadline", "both"]:
+            ax.plot(df_deadline['threshold'], df_deadline[metric], 's-', label='Deadline Penalty Model')
 
         ax.set_xlabel('Hard Task Threshold')
         ax.set_ylabel(title)
@@ -472,67 +558,90 @@ def hard_task_sensitivity(tasks, commitments, threshold_values):
         ax.legend()
 
         # Add data labels
-        for df, marker in [(df_no_y, 'o'), (df_deadline, 's')]:
-            for x, y in zip(df['threshold'], df[metric]):
+        if models in ["standard", "both"]:
+            for x, y in zip(df_no_y['threshold'], df_no_y[metric]):
+                ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
+                            xytext=(0, 10), ha='center')
+        
+        if models in ["deadline", "both"]:
+            for x, y in zip(df_deadline['threshold'], df_deadline[metric]):
                 ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points',
                             xytext=(0, 10), ha='center')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('sensitivity_results/hard_task_threshold_sensitivity.png', dpi=300, bbox_inches='tight')
+    
+    # Save with model-specific filename
+    if models == "both":
+        filename = 'hard_task_threshold_sensitivity.png'
+    elif models == "standard":
+        filename = 'hard_task_threshold_sensitivity_standard.png'
+    else:
+        filename = 'hard_task_threshold_sensitivity_deadline.png'
+        
+    plt.savefig(f'sensitivity_results/{filename}', dpi=300, bbox_inches='tight')
     plt.close()
 
-def daily_limit_sensitivity(tasks, commitments, limit_values):
-    """Analyze sensitivity to daily limit slots."""
+def daily_limit_sensitivity(tasks, commitments, limit_values, models="both"):
+    """Analyze sensitivity to daily limit slots.
+    
+    Args:
+        tasks: List of tasks
+        commitments: Dictionary of commitments
+        limit_values: List of daily limit slot values to test
+        models: Which models to run ("standard", "deadline", or "both")
+    """
     results_no_y = []
     results_deadline = []
 
     # Display "None" as "No Limit" for clarity
     x_labels = ['No Limit' if limit is None else str(limit) for limit in limit_values]
 
-    # Run both models with different daily limit values
+    # Run selected models with different daily limit values
     for limit in limit_values:
-        # Run no_y model
-        result_no_y = solve_no_y(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=0.1,   # Fixed
-            daily_limit_slots=limit,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_no_y.append({
-            'limit': limit,
-            'limit_label': 'No Limit' if limit is None else str(limit),
-            'objective': result_no_y.get('objective_value', 0),
-            'leisure': result_no_y.get('total_leisure', 0),
-            'stress': result_no_y.get('total_stress', 0),
-            'completion_rate': result_no_y.get('completion_rate', 0)
-        })
+        # Run standard model if selected
+        if models in ["standard", "both"]:
+            result_no_y = solve_no_y(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=0.1,   # Fixed
+                daily_limit_slots=limit,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_no_y.append({
+                'limit': limit,
+                'limit_label': 'No Limit' if limit is None else str(limit),
+                'objective': result_no_y.get('objective_value', 0),
+                'leisure': result_no_y.get('total_leisure', 0),
+                'stress': result_no_y.get('total_stress', 0),
+                'completion_rate': result_no_y.get('completion_rate', 0)
+            })
 
-        # Run deadline penalty model
-        result_deadline = solve_with_deadline_penalty(
-            tasks=tasks.copy(),
-            commitments=commitments.copy(),
-            alpha=1.0,  # Fixed
-            beta=0.1,   # Fixed
-            gamma=1.0,  # Fixed
-            daily_limit_slots=limit,
-            time_limit_sec=30,
-            hard_task_threshold=4
-        )
-        results_deadline.append({
-            'limit': limit,
-            'limit_label': 'No Limit' if limit is None else str(limit),
-            'objective': result_deadline.get('objective_value', 0),
-            'leisure': result_deadline.get('total_leisure', 0),
-            'stress': result_deadline.get('total_stress', 0),
-            'completion_rate': result_deadline.get('completion_rate', 0)
-        })
+        # Run deadline penalty model if selected
+        if models in ["deadline", "both"]:
+            result_deadline = solve_with_deadline_penalty(
+                tasks=tasks.copy(),
+                commitments=commitments.copy(),
+                alpha=1.0,  # Fixed
+                beta=0.1,   # Fixed
+                gamma=1.0,  # Fixed
+                daily_limit_slots=limit,
+                time_limit_sec=30,
+                hard_task_threshold=4
+            )
+            results_deadline.append({
+                'limit': limit,
+                'limit_label': 'No Limit' if limit is None else str(limit),
+                'objective': result_deadline.get('objective_value', 0),
+                'leisure': result_deadline.get('total_leisure', 0),
+                'stress': result_deadline.get('total_stress', 0),
+                'completion_rate': result_deadline.get('completion_rate', 0)
+            })
 
     # Create dataframes
-    df_no_y = pd.DataFrame(results_no_y)
-    df_deadline = pd.DataFrame(results_deadline)
+    df_no_y = pd.DataFrame(results_no_y) if results_no_y else None
+    df_deadline = pd.DataFrame(results_deadline) if results_deadline else None
 
     # Plot results
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
@@ -548,12 +657,20 @@ def daily_limit_sensitivity(tasks, commitments, limit_values):
         # Get indices for x-axis positioning
         x_indices = range(len(x_labels))
 
-        # Sort dataframes by limit for consistent plotting
-        df_no_y_sorted = df_no_y.sort_values(by='limit_label')
-        df_deadline_sorted = df_deadline.sort_values(by='limit_label')
+        # Initialize sorted dataframes
+        if models in ["standard", "both"]:
+            df_no_y_sorted = df_no_y.sort_values(by='limit_label')
+        
+        if models in ["deadline", "both"]:
+            df_deadline_sorted = df_deadline.sort_values(by='limit_label')
 
-        ax.plot(x_indices, df_no_y_sorted[metric], 'o-', label='Standard Model')
-        ax.plot(x_indices, df_deadline_sorted[metric], 's-', label='Deadline Penalty Model')
+        # Plot standard model if selected
+        if models in ["standard", "both"]:
+            ax.plot(x_indices, df_no_y_sorted[metric], 'o-', label='Standard Model')
+        
+        # Plot deadline model if selected
+        if models in ["deadline", "both"]:
+            ax.plot(x_indices, df_deadline_sorted[metric], 's-', label='Deadline Penalty Model')
 
         ax.set_xticks(x_indices)
         ax.set_xticklabels(x_labels)
@@ -563,13 +680,28 @@ def daily_limit_sensitivity(tasks, commitments, limit_values):
         ax.legend()
 
         # Add data labels
-        for idx, (df, marker) in enumerate([(df_no_y_sorted, 'o'), (df_deadline_sorted, 's')]):
-            for i, y in enumerate(df[metric]):
+        if models in ["standard", "both"]:
+            for i, y in enumerate(df_no_y_sorted[metric]):
                 ax.annotate(f'{y:.1f}', (i, y), textcoords='offset points',
-                            xytext=(0, 10 + 15*idx), ha='center')
+                            xytext=(0, 10), ha='center')
+        
+        if models in ["deadline", "both"]:
+            offset = 0 if models == "deadline" else 15
+            for i, y in enumerate(df_deadline_sorted[metric]):
+                ax.annotate(f'{y:.1f}', (i, y), textcoords='offset points',
+                            xytext=(0, 10 + offset), ha='center')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig('sensitivity_results/daily_limit_sensitivity.png', dpi=300, bbox_inches='tight')
+    
+    # Save with model-specific filename
+    if models == "both":
+        filename = 'daily_limit_sensitivity.png'
+    elif models == "standard":
+        filename = 'daily_limit_sensitivity_standard.png'
+    else:
+        filename = 'daily_limit_sensitivity_deadline.png'
+        
+    plt.savefig(f'sensitivity_results/{filename}', dpi=300, bbox_inches='tight')
     plt.close()
 
 def compare_models(tasks, commitments):
@@ -707,4 +839,20 @@ def analyze_task_distribution(result_no_y, result_deadline):
 # Run the sensitivity analysis if executed directly
 if __name__ == "__main__":
     import random
-    run_sensitivity_analysis()
+    import sys
+    
+    # Default to running both models if no argument is provided
+    model_option = "both"
+    
+    # Allow command-line argument to specify which model to run
+    if len(sys.argv) > 1:
+        model_arg = sys.argv[1].lower()
+        if model_arg in ["standard", "deadline", "both"]:
+            model_option = model_arg
+        else:
+            print(f"Invalid model option: {model_arg}")
+            print("Valid options are: 'standard', 'deadline', 'both'")
+            sys.exit(1)
+    
+    print(f"Running sensitivity analysis for {model_option} model(s)...")
+    run_sensitivity_analysis(models=model_option)
