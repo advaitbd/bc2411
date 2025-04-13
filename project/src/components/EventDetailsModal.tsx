@@ -1,7 +1,7 @@
 import React from "react";
 import { X } from "lucide-react";
 import { ScheduledTaskItem, BlockedInterval } from "../types";
-import { parseLocalISO } from "../utils/dateUtils";
+import { parseLocalISO, getDeadlineDisplay } from "../utils/dateUtils";
 import { format } from "date-fns";
 
 interface EventDetailsModalProps {
@@ -71,6 +71,12 @@ const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
                   Duration:
                 </strong>{" "}
                 {(selectedEvent as ScheduledTaskItem).duration_min} min
+              </p>
+              <p>
+                <strong className="font-medium text-gray-300 w-24 inline-block">
+                  Deadline:
+                </strong>{" "}
+                {getDeadlineDisplay((selectedEvent as ScheduledTaskItem).deadline || "")}
               </p>
               <p>
                 <strong className="font-medium text-gray-300 w-24 inline-block">

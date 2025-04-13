@@ -29,6 +29,7 @@ export interface ScheduledTaskItem {
   difficulty: number;
   duration_min: number;
   preference: string;
+  deadline?: string | number; // Add deadline field
   start_slot: number; // Added by backend
   end_slot: number; // Added by backend
 }

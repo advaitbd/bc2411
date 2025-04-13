@@ -382,6 +382,12 @@ function App() {
         result.schedule.forEach((item: ScheduledTaskItem) => {
           const startTime = parseLocalISO(item.startTime);
           if (startTime) {
+            // Add deadline from the original task
+            const originalTask = tasks.find(task => task.id === item.id);
+            if (originalTask) {
+              item.deadline = originalTask.deadline;
+            }
+            
             const dateKey = format(startTime, "yyyy-MM-dd");
             if (!scheduleByDate[dateKey]) {
               scheduleByDate[dateKey] = [];

@@ -1,6 +1,10 @@
 import React, { useMemo } from "react";
 import { Calendar as CalendarIcon, ArrowLeft, ArrowRight } from "lucide-react";
-import { BlockedInterval, OptimizedSchedule, ScheduledTaskItem } from "../types";
+import {
+  BlockedInterval,
+  OptimizedSchedule,
+  ScheduledTaskItem,
+} from "../types";
 import { parseLocalISO } from "../utils/dateUtils";
 import { format, addDays, isSameDay, addWeeks } from "date-fns";
 import { GRID_START_HOUR, GRID_END_HOUR } from "../utils/constants";
@@ -35,16 +39,16 @@ const CalendarComponent: React.FC<CalendarProps> = ({
   // Generate days and hours for the calendar
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i)),
-    [currentWeekStart]
+    [currentWeekStart],
   );
 
   const hours = useMemo(
     () =>
       Array.from(
         { length: GRID_END_HOUR - GRID_START_HOUR },
-        (_, i) => GRID_START_HOUR + i
+        (_, i) => GRID_START_HOUR + i,
       ),
-    []
+    [],
   );
 
   const renderCalendarEvent = (
@@ -53,7 +57,8 @@ const CalendarComponent: React.FC<CalendarProps> = ({
     title: string,
     type: "task" | "blocked",
     eventId: string,
-    onClick: () => void
+    onClick: () => void,
+    difficulty?: number,
   ) => {
     const start = parseLocalISO(startTimeStr);
     const end = parseLocalISO(endTimeStr);
@@ -67,22 +72,34 @@ const CalendarComponent: React.FC<CalendarProps> = ({
     if (totalDayViewMinutes <= 0) return null;
     const startMinutesOffset = Math.max(
       0,
-      start.getHours() * 60 + start.getMinutes() - dayViewStartHour * 60
+      start.getHours() * 60 + start.getMinutes() - dayViewStartHour * 60,
     );
     const endMinutesOffset = Math.min(
       totalDayViewMinutes,
-      end.getHours() * 60 + end.getMinutes() - dayViewStartHour * 60
+      end.getHours() * 60 + end.getMinutes() - dayViewStartHour * 60,
     );
     const durationMinutesInView = endMinutesOffset - startMinutesOffset;
     if (durationMinutesInView <= 0) return null;
     const topPercent = (startMinutesOffset / totalDayViewMinutes) * 100;
     const heightPercent = (durationMinutesInView / totalDayViewMinutes) * 100;
+
+    // Determine if this is a hard task (difficulty >= 4)
+    const isHardTask = type === "task" && difficulty && difficulty >= 4;
+
     const bgColor =
       type === "task"
-        ? "bg-purple-600 border-purple-400"
+        ? isHardTask
+          ? "bg-amber-600 border-amber-400" // Changed to a gentler amber/orange color for hard tasks
+          : "bg-purple-600 border-purple-400"
         : "bg-gray-600 border-gray-500";
+
     const hoverColor =
-      type === "task" ? "hover:bg-purple-700" : "hover:bg-gray-700";
+      type === "task"
+        ? isHardTask
+          ? "hover:bg-amber-700" // Matching hover effect
+          : "hover:bg-purple-700"
+        : "hover:bg-gray-700";
+
     const textColor = type === "task" ? "text-white" : "text-gray-200";
 
     return (
@@ -143,7 +160,7 @@ const CalendarComponent: React.FC<CalendarProps> = ({
           </button>
         </div>
       </div>
-      
+
       {/* Display Optimization Status/Messages */}
       {optimizationResult.status && (
         <div
@@ -156,7 +173,7 @@ const CalendarComponent: React.FC<CalendarProps> = ({
             ].includes(optimizationResult.status) && isOptimized
               ? "bg-green-900 border-green-700 text-green-200"
               : ["Infeasible", "Error", "No Schedulable Tasks"].includes(
-                    optimizationResult.status
+                    optimizationResult.status,
                   )
                 ? "bg-red-900 border-red-700 text-red-200"
                 : "bg-gray-700 border-gray-600 text-gray-300" // Default/other statuses
@@ -195,7 +212,7 @@ const CalendarComponent: React.FC<CalendarProps> = ({
             )}
         </div>
       )}
-      
+
       {/* Display general error if not handled by optimization status */}
       {error && !optimizationResult.status && (
         <div className="mb-4 p-3 rounded-lg text-sm bg-red-900 border border-red-700 text-red-200">
@@ -204,7 +221,7 @@ const CalendarComponent: React.FC<CalendarProps> = ({
           </p>
         </div>
       )}
-      
+
       <div className="overflow-x-auto relative w-full custom-scrollbar">
         <div className="grid grid-cols-[45px_repeat(7,1fr)] min-w-[800px] w-full">
           {/* Calendar Headers and Grid Lines */}
@@ -256,8 +273,9 @@ const CalendarComponent: React.FC<CalendarProps> = ({
                       interval.activity,
                       "blocked",
                       interval.id,
-                      () => onEventClick(interval)
-                    )
+                      () => onEventClick(interval),
+                      undefined,
+                    ),
                   )}
                 {/* Render Scheduled Tasks */}
                 {isOptimized &&
@@ -269,8 +287,9 @@ const CalendarComponent: React.FC<CalendarProps> = ({
                         scheduled.name,
                         "task",
                         scheduled.id,
-                        () => onEventClick(scheduled)
-                      )
+                        () => onEventClick(scheduled),
+                        scheduled.difficulty,
+                      ),
                   )}
               </div>
             </div>
