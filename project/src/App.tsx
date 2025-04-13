@@ -45,6 +45,8 @@ function App() {
   // const [mode, setMode] = useState<"auto" | "manual" | null>(null); // <-- REMOVE
   const [startHour, setStartHour] = useState(8); // User preference start
   const [endHour, setEndHour] = useState(22); // User preference end
+  const [alpha, setAlpha] = useState(1.0); // Default alpha for leisure weight
+  const [beta, setBeta] = useState(0.1); // Default beta for stress weight
   const [optimizedSchedule, setOptimizedSchedule] = useState<OptimizedSchedule>(
     {},
   );
@@ -135,13 +137,13 @@ function App() {
 
   // --- Effects ---
   // Reset optimized state when inputs change
-  // Update the useEffect to reset optimized state when model type changes (around line 113)
+  // Update the useEffect to reset optimized state when settings change
   useEffect(() => {
     setIsOptimized(false);
     setOptimizedSchedule({});
     setOptimizationResult((prev) => ({ ...prev, filteredTasksInfo: null })); // Clear filtered info too
     setError(null); // Also clear general errors
-  }, [tasks, blockedIntervals, startHour, endHour, modelType]); // Add modelType to deps
+  }, [tasks, blockedIntervals, startHour, endHour, modelType, alpha, beta]); // Include alpha/beta in deps
 
   // Helper to get task by ID
   const getTaskById = useCallback(
@@ -335,7 +337,9 @@ function App() {
       settings: {
         startHour: startHour,
         endHour: endHour,
-        modelType: modelType, // Add model type to payload
+        modelType: modelType,
+        alpha: alpha, // Add alpha parameter for leisure weight
+        beta: beta,   // Add beta parameter for stress weight
       },
     };
 
@@ -821,9 +825,13 @@ function App() {
               startHour={startHour}
               endHour={endHour}
               modelType={modelType}
+              alpha={alpha}
+              beta={beta}
               onStartHourChange={setStartHour}
               onEndHourChange={setEndHour}
               onModelTypeChange={setModelType}
+              onAlphaChange={setAlpha}
+              onBetaChange={setBeta}
               onShowExplanation={() => setShowExplanation(true)}
             />
 

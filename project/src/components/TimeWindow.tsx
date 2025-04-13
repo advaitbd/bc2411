@@ -1,14 +1,19 @@
 import React from "react";
 import { Settings } from "lucide-react";
 import ModelToggle from "./ModelToggle";
+import TradeoffSlider from "./TradeoffSlider";
 
 interface TimeWindowProps {
   startHour: number;
   endHour: number;
   modelType: "deadline_penalty" | "no_y";
+  alpha: number;
+  beta: number;
   onStartHourChange: (hour: number) => void;
   onEndHourChange: (hour: number) => void;
   onModelTypeChange: (modelType: "deadline_penalty" | "no_y") => void;
+  onAlphaChange: (value: number) => void;
+  onBetaChange: (value: number) => void;
   onShowExplanation: () => void;
 }
 
@@ -16,9 +21,13 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
   startHour,
   endHour,
   modelType,
+  alpha,
+  beta,
   onStartHourChange,
   onEndHourChange,
   onModelTypeChange,
+  onAlphaChange,
+  onBetaChange,
   onShowExplanation,
 }) => {
   return (
@@ -77,6 +86,16 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
             onExplanationClick={onShowExplanation}
           />
         </div>
+      </div>
+      
+      {/* Add optimization tradeoff slider */}
+      <div className="mt-6 border-t border-gray-700 pt-6">
+        <TradeoffSlider
+          alpha={alpha}
+          beta={beta}
+          onAlphaChange={onAlphaChange}
+          onBetaChange={onBetaChange}
+        />
       </div>
     </div>
   );

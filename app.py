@@ -355,10 +355,31 @@ def optimize_schedule():
             else:
                  print(f"Warning: Blocked Interval '{activity}' ({block_id}) resulted in invalid slot range ({start_slot} to {end_slot_inclusive}) after conversion. Local Times: {start_dt_local} to {end_dt_local}. May be outside the {start_hour}:00-{end_hour}:00 window or 7-day horizon.")
 
-        # --- Parse Other Settings (e.g., Daily Limit - currently unused) ---
+        # --- Parse Other Settings (alpha, beta, daily limit) ---
         settings_errors = []
-        alpha = 1 # Default, could be overridden by settings
-        beta = 0.1 # Default, could be overridden by settings
+        
+        # Get alpha (leisure weight) from settings or use default
+        alpha = settings_input.get('alpha', 1.0)
+        try:
+            alpha = float(alpha)
+            if alpha <= 0:
+                settings_errors.append(f"Alpha must be positive, got {alpha}. Using default of 1.0.")
+                alpha = 1.0
+        except (ValueError, TypeError):
+            settings_errors.append(f"Invalid alpha value: {alpha}. Using default of 1.0.")
+            alpha = 1.0
+            
+        # Get beta (stress weight) from settings or use default
+        beta = settings_input.get('beta', 0.1)
+        try:
+            beta = float(beta)
+            if beta < 0:
+                settings_errors.append(f"Beta must be non-negative, got {beta}. Using default of 0.1.")
+                beta = 0.1
+        except (ValueError, TypeError):
+            settings_errors.append(f"Invalid beta value: {beta}. Using default of 0.1.")
+            beta = 0.1
+            
         daily_limit_slots = None # Default no limit
 
         # --- Combine Errors and Check ---
