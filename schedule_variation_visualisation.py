@@ -28,7 +28,7 @@ import os
 from datetime import datetime, timedelta
 
 # Import the scheduler and data generation functions from your modules
-from allocation_logic_no_y import solve_schedule_gurobi as solve_no_y, get_day0_ref_midnight, datetime_to_slot
+from allocation_logic_deadline_penalty import solve_schedule_gurobi as solve_no_y, get_day0_ref_midnight, datetime_to_slot
 from app import auto_generate_tasks, auto_generate_blocked
 
 # Create output directory for schedule charts

@@ -44,7 +44,8 @@ def auto_generate_tasks(num_tasks=10):
         "Math 101", "Computer Science 202", "Physics 150", "English 105",
         "History 201", "Chemistry 110", "Economics 230", "Psychology 120"
     ]
-    pref_choices = ["morning", "afternoon", "evening", "any"]
+    # pref_choices = ["morning", "afternoon", "evening", "any"]
+    pref_choices = ["any"]
 
     tasks = []
     # Use default hours for generation logic's date reference
@@ -90,6 +91,7 @@ def auto_generate_tasks(num_tasks=10):
             "preference": pref
         })
     print(f"Generated {len(tasks)} tasks.")
+    print(tasks)
     return tasks
 
 def auto_generate_blocked(n_intervals=8):
@@ -357,7 +359,7 @@ def optimize_schedule():
 
         # --- Parse Other Settings (alpha, beta, daily limit) ---
         settings_errors = []
-        
+
         # Get alpha (leisure weight) from settings or use default
         alpha = settings_input.get('alpha', 1.0)
         try:
@@ -368,7 +370,7 @@ def optimize_schedule():
         except (ValueError, TypeError):
             settings_errors.append(f"Invalid alpha value: {alpha}. Using default of 1.0.")
             alpha = 1.0
-            
+
         # Get beta (stress weight) from settings or use default
         beta = settings_input.get('beta', 0.1)
         try:
@@ -379,7 +381,7 @@ def optimize_schedule():
         except (ValueError, TypeError):
             settings_errors.append(f"Invalid beta value: {beta}. Using default of 0.1.")
             beta = 0.1
-            
+
         daily_limit_slots = None # Default no limit
 
         # --- Combine Errors and Check ---

@@ -2,6 +2,7 @@ import React from "react";
 import { Settings } from "lucide-react";
 import ModelToggle from "./ModelToggle";
 import TradeoffSlider from "./TradeoffSlider";
+import DailyLimit from "./DailyLimit";
 
 interface TimeWindowProps {
   startHour: number;
@@ -9,11 +10,13 @@ interface TimeWindowProps {
   modelType: "deadline_penalty" | "no_y";
   alpha: number;
   beta: number;
+  dailyLimit: number | null;
   onStartHourChange: (hour: number) => void;
   onEndHourChange: (hour: number) => void;
   onModelTypeChange: (modelType: "deadline_penalty" | "no_y") => void;
   onAlphaChange: (value: number) => void;
   onBetaChange: (value: number) => void;
+  onDailyLimitChange: (value: number | null) => void;
   onShowExplanation: () => void;
 }
 
@@ -23,11 +26,13 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
   modelType,
   alpha,
   beta,
+  dailyLimit,
   onStartHourChange,
   onEndHourChange,
   onModelTypeChange,
   onAlphaChange,
   onBetaChange,
+  onDailyLimitChange,
   onShowExplanation,
 }) => {
   return (
@@ -89,12 +94,18 @@ const TimeWindow: React.FC<TimeWindowProps> = ({
       </div>
       
       {/* Add optimization tradeoff slider */}
-      <div className="mt-6 border-t border-gray-700 pt-6">
+      <div className="mt-6 border-t border-gray-700 pt-6 space-y-6">
         <TradeoffSlider
           alpha={alpha}
           beta={beta}
           onAlphaChange={onAlphaChange}
           onBetaChange={onBetaChange}
+        />
+        
+        {/* Add daily limit control */}
+        <DailyLimit
+          dailyLimit={dailyLimit}
+          onDailyLimitChange={onDailyLimitChange}
         />
       </div>
     </div>

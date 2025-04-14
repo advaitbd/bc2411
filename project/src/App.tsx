@@ -47,6 +47,7 @@ function App() {
   const [endHour, setEndHour] = useState(22); // User preference end
   const [alpha, setAlpha] = useState(1.0); // Default alpha for leisure weight
   const [beta, setBeta] = useState(0.1); // Default beta for stress weight
+  const [dailyLimit, setDailyLimit] = useState<number | null>(null); // Default: no daily limit
   const [optimizedSchedule, setOptimizedSchedule] = useState<OptimizedSchedule>(
     {},
   );
@@ -143,7 +144,7 @@ function App() {
     setOptimizedSchedule({});
     setOptimizationResult((prev) => ({ ...prev, filteredTasksInfo: null })); // Clear filtered info too
     setError(null); // Also clear general errors
-  }, [tasks, blockedIntervals, startHour, endHour, modelType, alpha, beta]); // Include alpha/beta in deps
+  }, [tasks, blockedIntervals, startHour, endHour, modelType, alpha, beta, dailyLimit]); // Include all optimization settings in deps
 
   // Helper to get task by ID
   const getTaskById = useCallback(
@@ -340,6 +341,7 @@ function App() {
         modelType: modelType,
         alpha: alpha, // Add alpha parameter for leisure weight
         beta: beta,   // Add beta parameter for stress weight
+        dailyLimit: dailyLimit, // Add daily limit parameter
       },
     };
 
@@ -833,11 +835,13 @@ function App() {
               modelType={modelType}
               alpha={alpha}
               beta={beta}
+              dailyLimit={dailyLimit}
               onStartHourChange={setStartHour}
               onEndHourChange={setEndHour}
               onModelTypeChange={setModelType}
               onAlphaChange={setAlpha}
               onBetaChange={setBeta}
+              onDailyLimitChange={setDailyLimit}
               onShowExplanation={() => setShowExplanation(true)}
             />
 
