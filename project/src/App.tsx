@@ -58,8 +58,8 @@ function App() {
 
   // Calculate currentWeek based on local time start of the week
   const [currentWeekStart, setCurrentWeekStart] = useState(() =>
-    startOfWeek(new Date(), { weekStartsOn: 1 }),
-  ); // Monday as start
+    new Date("2025-04-21T00:00:00"),
+  ); // Hardcoded Monday, 21st April 2025 for demo
 
   const [isOptimized, setIsOptimized] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // Loading state for API calls

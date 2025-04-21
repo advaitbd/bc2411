@@ -17,6 +17,78 @@ const TaskFormFields: React.FC<TaskFormProps> = ({
   minDurationHint,
 }) => (
   <>
+    {/* Custom Suggested Tasks Dropdown */}
+    <div className="mb-2 relative">
+      <label className="block text-xs font-medium text-gray-400 mb-1">Quick Suggestions</label>
+      {(() => {
+        const [open, setOpen] = React.useState(false);
+        const suggestions = [
+          "Assignment",
+          "Study Session",
+          "Group Project",
+          "Reading",
+          "Homework",
+          "Essay",
+          "Lab Report",
+          "Exam Prep",
+          "Research",
+          "Presentation Prep"
+        ];
+        const handleSelect = (value: string) => {
+          setOpen(false);
+          const syntheticEvent = {
+            target: {
+              name: 'name',
+              value,
+              type: 'text',
+            }
+          } as React.ChangeEvent<HTMLInputElement>;
+          onChange(syntheticEvent);
+        };
+        // For accessibility: close on Escape
+        React.useEffect(() => {
+          if (!open) return;
+          const handler = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setOpen(false);
+          };
+          window.addEventListener('keydown', handler);
+          return () => window.removeEventListener('keydown', handler);
+        }, [open]);
+        return (
+          <div className="relative">
+            <button
+              type="button"
+              className={`w-full bg-gray-700 rounded px-3 py-2 border border-gray-600 text-left text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent flex justify-between items-center ${open ? 'ring-2 ring-purple-500 border-transparent' : ''}`}
+              onClick={() => setOpen(o => !o)}
+              aria-haspopup="listbox"
+              aria-expanded={open}
+            >
+              {formData.name && suggestions.includes(formData.name) ? formData.name : 'Select a suggested task...'}
+              <svg className={`ml-2 w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            {open && (
+              <ul
+                className="absolute z-10 mt-1 w-full bg-gray-700 border border-gray-600 rounded shadow-lg max-h-60 overflow-auto focus:outline-none"
+                tabIndex={-1}
+                role="listbox"
+              >
+                {suggestions.map((s) => (
+                  <li
+                    key={s}
+                    className={`px-3 py-2 cursor-pointer hover:bg-purple-600 hover:text-white transition-colors ${formData.name === s ? 'bg-purple-700 text-white' : 'text-gray-300'}`}
+                    onClick={() => handleSelect(s)}
+                    role="option"
+                    aria-selected={formData.name === s}
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })()}
+    </div>
     {/* Task Name */}
     <div>
       <label

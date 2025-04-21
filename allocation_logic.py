@@ -22,13 +22,9 @@ _day0_naive_local = None
 def get_day0():
     global _day0_naive_local
     if _day0_naive_local is None:
-        # Ensure it gets initialized only once, even if called multiple times before 8am
-        now = datetime.now()
-        start_of_today = now.replace(hour=8, minute=0, second=0, microsecond=0)
-        # If current time is before 8am today, day0 should be 8am today.
-        # If current time is after 8am today, day0 should still be 8am today.
-        _day0_naive_local = start_of_today
-        print(f"Initialized DAY0 (naive local): {_day0_naive_local}")
+        # Hardcode DAY0 to be Monday, 21st April 2025, 8:00 AM for demo
+        _day0_naive_local = datetime(2025, 4, 21, 8, 0, 0, 0)
+        print(f"Initialized DAY0 (naive local, HARDCODED FOR DEMO): {_day0_naive_local}")
     return _day0_naive_local
 
 # ------------------------------------------------------------

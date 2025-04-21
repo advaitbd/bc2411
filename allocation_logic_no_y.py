@@ -21,10 +21,9 @@ def get_day0_ref_midnight():
     """Returns the date of Day 0 at midnight, naive local."""
     global _day0_naive_local_ref_midnight
     if _day0_naive_local_ref_midnight is None:
-        now = datetime.now()
-        start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        _day0_naive_local_ref_midnight = start_of_today
-        # print(f"Initialized DAY0 Reference Midnight (naive local): {_day0_naive_local_ref_midnight}")
+        # Hardcode DAY0 Reference Midnight to Monday, 21st April 2025, 00:00 for demo
+        _day0_naive_local_ref_midnight = datetime(2025, 4, 21, 0, 0, 0, 0)
+        # print(f"Initialized DAY0 Reference Midnight (HARDCODED FOR DEMO): {_day0_naive_local_ref_midnight}")
     return _day0_naive_local_ref_midnight
 
 # ------------------------------------------------------------
